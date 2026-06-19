@@ -39,6 +39,8 @@ The system has two main flows: **Indexing** (processing uploaded PDFs into searc
 
 ---
 
+Hugging Face Link : [Research Assistance RAG System](https://huggingface.co/spaces/TatsatPathak/Research-RAG-Assistance)
+
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
