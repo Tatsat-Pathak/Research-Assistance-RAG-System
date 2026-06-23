@@ -28,7 +28,7 @@ Instead of relying on high-level wrappers like LangChain or LlamaIndex, the enti
 
 The system has two main flows: **Indexing** (processing uploaded PDFs into searchable vectors) and **Querying** (answering user questions from those vectors).
 
-![RAG Architecture Diagram](assets/rag_architecture.png)
+![RAG Architecture Diagram](rag_architecture.png)
 
 ### Deep Dive: The Custom RAG Pipeline
 1. **Trimming (`paper_triming`):** Detects the start of the "Abstract" or "Introduction" and the start of "Conclusion" or "References". Everything outside these bounds is discarded to prevent the LLM from hallucinating on citations.
@@ -38,6 +38,8 @@ The system has two main flows: **Indexing** (processing uploaded PDFs into searc
 5. **Generation (`answer_generator`):** Sends the structured prompt to the OpenRouter API.
 
 ---
+
+Hugging Face Link : [Research Assistance RAG System](https://huggingface.co/spaces/TatsatPathak/Research-RAG-Assistance)
 
 ## 🚀 Getting Started
 
