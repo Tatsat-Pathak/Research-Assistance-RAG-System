@@ -9,9 +9,202 @@ import os
 import time
 import uuid
 import shutil
+import traceback
 import streamlit as st
 from pathlib import Path
-from backend_interface import ask, index_pdfs, AskResult, Source
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DIRECT IMPORTS FROM RAG_Pipeline.py
+# ─────────────────────────────────────────────────────────────────────────────
+import RAG_Pipeline
+from RAG_Pipeline import (
+    parse_document,
+    chunks_generation,
+    combining_chunks,
+    load_embedded_model,
+    create_embedding_text,
+    initialize_vector_database,
+    initialize_collections,
+    query_builder,
+    answer_generator,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DATACLASSES  (UI contract)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class Source:
+    """One retrieved source displayed under an assistant message."""
+    doc_title:       str
+    section_heading: str
+    similarity:      float
+    is_table:        bool = False
+    snippet:         str  = ""
+
+@dataclass
+class AskResult:
+    """Return type of ask()."""
+    answer:  str
+    sources: List[Source] = field(default_factory=list)
+    error:   Optional[str] = None
+
+@dataclass
+class IndexResult:
+    """Return type of index_pdfs()."""
+    success:   bool
+    doc_count: int = 0
+    message:   str = ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SINGLETONS  (loaded once, reused across Streamlit reruns)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_embedding_model = None
+_chroma_client   = None
+
+def _get_embedding_model():
+    global _embedding_model
+    if _embedding_model is None:
+        _embedding_model = load_embedded_model("BAAI/bge-base-en-v1.5")
+    return _embedding_model
+
+def _get_chroma_client():
+    global _chroma_client
+    if _chroma_client is None:
+        _chroma_client = initialize_vector_database()
+    return _chroma_client
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# index_pdfs  —  calls RAG_Pipeline functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+def index_pdfs(pdf_paths: List[str]) -> IndexResult:
+    try:
+        # 1. Parse every PDF
+        papers_section_heading: Dict[str, list] = {}
+        parsed_count = 0
+        for path in pdf_paths:
+            file_name, _, sections = parse_document(path)
+            if sections:
+                papers_section_heading[file_name] = sections
+                parsed_count += 1
+
+        if not papers_section_heading:
+            return IndexResult(success=False, doc_count=0,
+                               message="No readable sections found in the uploaded PDFs.")
+
+        # 2. Generate chunks
+        paper_chunks = chunks_generation(papers_section_heading, chunk_size=500)
+
+        # 3. Flatten
+        all_chunks, all_ids = combining_chunks(paper_chunks)
+        if not all_chunks:
+            return IndexResult(success=False, doc_count=parsed_count,
+                               message="Documents parsed but no chunks were generated.")
+
+        # 4. Embed
+        model = _get_embedding_model()
+        RAG_Pipeline.embedding_model = model          # inject for query_builder()
+        embeddings, shape = create_embedding_text(model, all_chunks, size=64)
+
+        # 5. ChromaDB — drop all existing collections, recreate fresh
+        client = _get_chroma_client()
+        try:
+            for col in client.list_collections():
+                col_name = col.name if hasattr(col, 'name') else str(col)
+                try:
+                    client.delete_collection(col_name)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        collection = initialize_collections(client)
+
+        # 6. Store (bypasses add_in_collection typo: embedding → embeddings)
+        collection.add(
+            ids        = all_ids,
+            documents  = all_chunks,
+            embeddings = embeddings.tolist(),
+        )
+
+        RAG_Pipeline.collection = collection          # inject for query_builder()
+
+        return IndexResult(
+            success=True, doc_count=parsed_count,
+            message=f"Indexed {parsed_count} document(s) → {len(all_chunks)} chunks stored.",
+        )
+
+    except Exception as exc:
+        tb = traceback.format_exc()
+        return IndexResult(success=False, doc_count=0,
+                           message=f"Indexing error: {exc}\n\nTraceback:\n{tb}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ask  —  calls RAG_Pipeline functions directly
+# ─────────────────────────────────────────────────────────────────────────────
+
+def ask(question: str, pdf_paths=None, chat_history=None) -> AskResult:
+    try:
+        if not hasattr(RAG_Pipeline, "collection") or RAG_Pipeline.collection is None:
+            return AskResult(answer="",
+                             error="No documents indexed yet. Please upload and index PDFs first.")
+
+        # 1. Build prompt + retrieve context
+        prompt, source_titles, chunk_ids = query_builder(question)
+
+        # 2. Generate answer
+        answer = answer_generator(prompt)
+        if answer == "Error":
+            return AskResult(answer="",
+                             error="LLM API returned an error. Check your OPEN_ROUTER_API_KEY.")
+
+        # 3. Build Source objects from chunk IDs
+        sources: List[Source] = []
+        seen_ids: set = set()
+        for cid in chunk_ids:
+            if cid in seen_ids:
+                continue
+            seen_ids.add(cid)
+
+            pdf_marker = cid.find(".pdf")
+            if pdf_marker != -1:
+                doc_title = cid[:pdf_marker + 4]
+                remainder = cid[pdf_marker + 5:]
+            else:
+                doc_title = cid
+                remainder = ""
+
+            chunk_marker = remainder.rfind("_chunk_")
+            if chunk_marker != -1:
+                before_chunk = remainder[:chunk_marker]
+                last_underscore = before_chunk.rfind("_")
+                section_heading = before_chunk[:last_underscore] if last_underscore != -1 else before_chunk
+            else:
+                section_heading = remainder
+
+            section_heading = section_heading.replace("_", " ").strip()
+            doc_title_clean = doc_title.replace("_", " ").replace(".pdf", "").strip()
+
+            sources.append(Source(
+                doc_title       = doc_title_clean if doc_title_clean else doc_title,
+                section_heading = section_heading if section_heading else "N/A",
+                similarity      = 0.0,
+                is_table        = False,
+                snippet         = "",
+            ))
+
+        return AskResult(answer=answer, sources=sources)
+
+    except Exception as exc:
+        return AskResult(answer="", error=f"Pipeline error: {exc}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
