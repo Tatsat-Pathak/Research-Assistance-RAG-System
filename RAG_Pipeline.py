@@ -2,7 +2,7 @@ import re
 import os
 import json
 import chromadb
-import requests
+from openai import OpenAI
 import glob as g
 import pymupdf4llm as p
 from dotenv import load_dotenv
@@ -218,28 +218,36 @@ def answer_generator(prompt : str):
     
     load_dotenv()
 
-    response = requests.post(
-    url="https://openrouter.ai/api/v1/chat/completions",
-    headers={
-        "Authorization": f"Bearer {os.getenv('OPEN_ROUTER_API_KEY')}",
-        "Content-Type": "application/json",
-    },
-    data=json.dumps({
-        "model": "nex-agi/nex-n2-pro:free",
-        "messages": [
-            {
-            "role": "user",
-            "content": f"{prompt}"
-            }
-        ],
-        "reasoning": {"enabled": True}
-    })
-    )
-    result = response.json()
+    client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv('OPEN_ROUTER_API_KEY'),
+)
 
-    if "choices" not in result:
-        return "Error"
-    else:
-        answer = result['choices'][0]["message"]["content"]
-        answer = answer.replace("*", "")
-        return answer
+    try:
+
+        response = client.chat.completions.create(
+        model="nvidia/nemotron-3-ultra-550b-a55b:free",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+            ],
+        extra_body={"reasoning": {"enabled": True}}
+    )
+        message = response.choices[0].message
+
+        return {
+            "success": True,
+            "content": message.content,
+            "reasoning": message.reasoning,
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "content": None,
+            "reasoning": None,
+            "error": str(e)
+        }

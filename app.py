@@ -162,9 +162,11 @@ def ask(question: str, pdf_paths=None, chat_history=None) -> AskResult:
 
         # 2. Generate answer
         answer = answer_generator(prompt)
-        if answer == "Error":
+        # if answer == "Error":
+        if answer['success'] == False:
+            print(answer['error'])
             return AskResult(answer="",
-                             error="LLM API returned an error. Check your OPEN_ROUTER_API_KEY.")
+                             error="There is an problem with backend")
 
         # 3. Build Source objects from chunk IDs
         sources: List[Source] = []
@@ -201,7 +203,7 @@ def ask(question: str, pdf_paths=None, chat_history=None) -> AskResult:
                 snippet         = "",
             ))
 
-        return AskResult(answer=answer, sources=sources)
+        return AskResult(answer=answer['content'] + "\n" + answer['reasoning'], sources=sources)
 
     except Exception as exc:
         return AskResult(answer="", error=f"Pipeline error: {exc}")
@@ -937,9 +939,6 @@ st.markdown("""
 # ── Suggestion chips (if no conversation yet) ─────────────────────────────────
 SUGGESTIONS = [
     "What are the main contributions of these papers?",
-    "What factors affect developer productivity the most?",
-    "How does code quality causally impact productivity?",
-    "Explain the attention mechanism in transformers.",
     "What are common threats to validity in these studies?",
     "Compare the methodologies used across the papers.",
 ]
