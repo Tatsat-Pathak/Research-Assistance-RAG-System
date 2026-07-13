@@ -38,8 +38,8 @@ The system has two main flows: **Indexing** (processing uploaded PDFs into searc
 5. **Generation (`answer_generator`):** Sends the structured prompt to the OpenRouter API.
 
 ---
-
-Hugging Face Link : [Research Assistance RAG System](https://huggingface.co/spaces/TatsatPathak/Research-RAG-Assistance)
+### Project Live 
+[Research Assistance RAG System](https://rag-powered-research-assistance.streamlit.app/)
 
 ## 🚀 Getting Started
 
