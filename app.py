@@ -672,12 +672,6 @@ with st.sidebar:
             "Show source citations", value=st.session_state.get("show_sources", True),
             help="Display which papers and sections were used to answer."
         )
-        custom_key = st.text_input(
-            "OpenRouter API Key (Optional)",
-            value=os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY", ""),
-            type="password",
-            help="Enter your OpenRouter key if not configured in environment secrets."
-        )
         if custom_key:
             os.environ["OPENROUTER_API_KEY"] = custom_key
             os.environ["OPEN_ROUTER_API_KEY"] = custom_key
