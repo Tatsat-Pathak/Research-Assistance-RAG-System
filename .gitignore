@@ -1,0 +1,9 @@
+upload_pdfs_chroma_db/
+uploaded_pdfs/
+parse_cache/
+__pycache__/
+*.pyc
+*.sqlite3
+*.bin
+.env
+.DS_Store
