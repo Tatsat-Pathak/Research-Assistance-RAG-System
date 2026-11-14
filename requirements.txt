@@ -2,6 +2,8 @@ streamlit
 chromadb
 pymupdf4llm
 sentence-transformers
-python-dotenv
 openai
 requests
+python-dotenv
+loguru
+pydantic

@@ -26,6 +26,7 @@ os.environ["ANONYMIZED_TELEMETRY"] = "False"
 # Direct imports from local RAG_Pipeline
 import RAG_Pipeline
 from RAG_Pipeline import (
+    parse_document,
     parse_documents_batch,
     chunks_generation,
     combining_chunks,
@@ -131,21 +132,9 @@ def index_pdfs(pdf_paths: List[str]) -> IndexResult:
         collection.add(**add_kwargs)
         RAG_Pipeline.collection = collection
 
-        # Log per-paper chunk distribution
-        paper_chunk_dist = {}
-        if getattr(RAG_Pipeline, "last_metadatas", None):
-            for meta in RAG_Pipeline.last_metadatas:
-                pt = meta.get("paper_title", "Unknown")
-                paper_chunk_dist[pt] = paper_chunk_dist.get(pt, 0) + 1
-
-        dist_msg = ""
-        if paper_chunk_dist:
-            dist_lines = [f"  • {title}: {count} chunks" for title, count in paper_chunk_dist.items()]
-            dist_msg = "\n" + "\n".join(dist_lines)
-
         return IndexResult(
             success=True, doc_count=parsed_count,
-            message=f"Indexed {parsed_count} document(s) → {len(all_chunks)} chunks stored.{dist_msg}",
+            message=f"Indexed {parsed_count} document(s) → {len(all_chunks)} chunks stored.",
         )
 
     except Exception as exc:
@@ -490,7 +479,6 @@ def init_state():
         "indexed":      False,
         "indexing":     False,
         "index_error":  "",
-        "index_message": "",
         "session_id":   str(uuid.uuid4())[:8],
     }
     for k, v in defaults.items():
@@ -587,7 +575,6 @@ def do_indexing():
     st.session_state.indexed      = result.success
     st.session_state.indexing     = False
     st.session_state.index_error  = "" if result.success else result.message
-    st.session_state.index_message = result.message if result.success else ""
     return result
 
 
@@ -694,9 +681,6 @@ with st.sidebar:
 
         if st.session_state.indexed:
             st.success(f"✓ Indexed {len(st.session_state.loaded_pdfs)} document(s) — ready to query.")
-            if st.session_state.get("index_message"):
-                with st.expander("📊 Indexing details", expanded=False):
-                    st.text(st.session_state.index_message)
         elif st.session_state.index_error:
             st.error("✗ Indexing failed")
             with st.expander("Show error details", expanded=False):
