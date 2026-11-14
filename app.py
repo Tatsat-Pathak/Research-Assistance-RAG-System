@@ -698,10 +698,6 @@ with st.sidebar:
             "Show source citations", value=st.session_state.get("show_sources", True),
             help="Display which papers and sections were used to answer."
         )
-        if custom_key:
-            os.environ["OPENROUTER_API_KEY"] = custom_key
-            os.environ["OPEN_ROUTER_API_KEY"] = custom_key
-
         if st.button("🧹 Clear Chat History", key="btn_clear_chat", use_container_width=True):
             st.session_state.messages     = []
             st.session_state.chat_history = []
