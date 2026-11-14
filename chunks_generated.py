@@ -24,6 +24,8 @@ import json
 import re
 
 TARGET, MAX, MIN_TAIL, OVERLAP_SENTS = 300, 400, 60, 1
+# Defaults kept for backwards compatibility; chunk_papers(target_words=...)
+# overrides them per call. MAX is always target_words + 100.
 MIN_SECTION = 60
 
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z(\[$])")
@@ -50,11 +52,11 @@ def heading_depth(h, prev_depth, prev_empty):
 
 
 # ---------- packing ----------
-def split_long(par):
+def split_long(par, target=TARGET):
     sents, out, cur, n = SENT_SPLIT.split(par), [], [], 0
     for s in sents:
         w = len(s.split())
-        if cur and n + w > TARGET:
+        if cur and n + w > target:
             out.append(" ".join(cur)); cur, n = [], 0
         cur.append(s); n += w
     if cur:
@@ -62,14 +64,14 @@ def split_long(par):
     return out
 
 
-def pack(paragraphs):
+def pack(paragraphs, target=TARGET, max_words=MAX):
     units = []
     for p in paragraphs:
-        units.extend(split_long(p) if len(p.split()) > MAX else [p])
+        units.extend(split_long(p, target) if len(p.split()) > max_words else [p])
     chunks, cur, n = [], [], 0                      # members: (text, is_overlap)
     for u in units:
         w = len(u.split())
-        if cur and n + w > TARGET:
+        if cur and n + w > target:
             chunks.append(cur)
             tail = SENT_SPLIT.split(cur[-1][0])[-OVERLAP_SENTS:] if OVERLAP_SENTS else []
             cur = [(" ".join(tail), True)] if tail else []
@@ -83,11 +85,11 @@ def pack(paragraphs):
     return ["\n\n".join(m[0] for m in c) for c in chunks]
 
 
-def split_rows(prefix, header, rows, suffix):
+def split_rows(prefix, header, rows, suffix, target=TARGET):
     pieces, cur, n = [], [], 0
     for r in rows:
         w = len(r.split())
-        if cur and n + w > TARGET:
+        if cur and n + w > target:
             pieces.append(cur); cur, n = [], 0
         cur.append(r); n += w
     pieces.append(cur)
@@ -97,18 +99,18 @@ def split_rows(prefix, header, rows, suffix):
             for i, part in enumerate(pieces, 1)]
 
 
-def table_pieces(it):
+def table_pieces(it, target=TARGET, max_words=MAX):
     lines = it["content"].split("\n")
-    if len(it["content"].split()) <= MAX or len(lines) <= 3:
+    if len(it["content"].split()) <= max_words or len(lines) <= 3:
         return ["\n\n".join(x for x in (it["caption"], it["content"], it.get("footnote", "")) if x)]
-    return split_rows(it["caption"], lines[:2], lines[2:], it.get("footnote", ""))
+    return split_rows(it["caption"], lines[:2], lines[2:], it.get("footnote", ""), target)
 
 
-def code_pieces(it):
+def code_pieces(it, target=TARGET, max_words=MAX):
     lines = it["content"].split("\n")
-    if len(it["content"].split()) <= MAX or len(lines) <= 3:
+    if len(it["content"].split()) <= max_words or len(lines) <= 3:
         return ["\n\n".join(x for x in (it["caption"], it["content"]) if x)]
-    return split_rows(it["caption"], [], lines, "")
+    return split_rows(it["caption"], [], lines, "", target)
 
 
 def fold_subcaptions(items):
@@ -126,8 +128,13 @@ def fold_subcaptions(items):
 
 
 # ---------- build ----------
-def chunk_papers(documents):
-    """documents: {paper_title: {heading: [item, ...]}} -> list of chunk dicts."""
+def chunk_papers(documents, target_words: int = TARGET):
+    """documents: {paper_title: {heading: [item, ...]}} -> list of chunk dicts.
+
+    target_words is the target size of a prose chunk, in words (default 300).
+    A single paragraph longer than target_words + 100 is split on sentences.
+    """
+    max_words = target_words + 100
     out = []
     for p_idx, (title, sections) in enumerate(documents.items()):
         pid, c = f"p{p_idx:02d}", 0
@@ -164,23 +171,23 @@ def chunk_papers(documents):
             prev = next((x for x in reversed(paper_chunks) if x["chunk_type"] in ("body", "abstract")), None)
             if (prose and prose_words < MIN_SECTION and ptype == "body" and prev
                     and prev["section_path"][0] == path[0]
-                    and prev["word_count"] + prose_words + 3 <= MAX):
+                    and prev["word_count"] + prose_words + 3 <= max_words):
                 add = h + "\n" + "\n\n".join(prose)
                 prev["text"] += "\n\n" + add
                 prev["word_count"] = len(prev["text"].split())
                 prev["embed_text"] = f"Paper: {title}\nSection: {' > '.join(prev['section_path'])}\n\n{prev['text']}"
             else:
-                for text in pack(prose):
+                for text in pack(prose, target_words, max_words):
                     emit(h, path, ptype, text)
 
             for i in items:
                 if i["type"] == "table":
-                    for piece in table_pieces(i):
+                    for piece in table_pieces(i, target_words, max_words):
                         emit(h, path, "table", piece, i.get("label"))
                 elif i["type"] == "figure":
                     emit(h, path, "figure_caption", i["content"], i.get("label"))
                 elif i["type"] == "code":
-                    for piece in code_pieces(i):
+                    for piece in code_pieces(i, target_words, max_words):
                         emit(h, path, "code", piece)
         for rec in paper_chunks:
             rec.pop("_mergeable")
