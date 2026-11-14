@@ -1,6 +1,6 @@
 streamlit
 chromadb
-pymupdf4llm
+mineru
 sentence-transformers
 openai
 requests
