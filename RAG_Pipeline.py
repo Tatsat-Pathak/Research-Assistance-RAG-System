@@ -248,6 +248,10 @@ def combining_chunks(paper_chunks) -> Tuple[list, list]:
         last_metadatas = [
             {
                 "paper_title": c["paper_title"],
+                # paper_id ("p00", "p01", ...) stays distinct even if two
+                # papers ever share the same title, so per-paper retrieval
+                # below can group by title without merging them.
+                "paper_id": c.get("paper_id", "") or "",
                 "section": c["section"],
                 "section_path": " > ".join(c["section_path"]) if isinstance(c["section_path"], list) else str(c["section_path"]),
                 "chunk_type": c.get("chunk_type", "body"),
@@ -347,7 +351,63 @@ def add_in_collection(collection, ids: list, chunks: list, embedded_text, metada
 # ─────────────────────────────────────────────────────────────────────────────
 # Retrieval & Prompt Construction
 # ─────────────────────────────────────────────────────────────────────────────
-def query_builder(user_query: str, top_k: int = 15) -> Tuple[str, list, list]:
+def _list_paper_titles(coll) -> list:
+    """Distinct paper titles in the collection, in first-seen order.
+
+    Falls back to an empty list if the collection cannot be listed, in
+    which case query_builder() falls back to one global top-k search.
+    """
+    try:
+        data = coll.get(include=["metadatas"])
+    except Exception as e:
+        logger.warning(f"Could not list papers in collection ({e}); using global retrieval.")
+        return []
+    titles = []
+    for meta in (data.get("metadatas") or []):
+        title = (meta or {}).get("paper_title")
+        if title and title not in titles:
+            titles.append(title)
+    return titles
+
+
+def _abstract_chunk_for_paper(coll, paper_title: str):
+    """Return (id, document, metadata) of the first Abstract chunk for a
+    paper, or None. Used so a paper is never represented only by a random
+    middle section when the question is about the paper as a whole."""
+    try:
+        data = coll.get(
+            where={"paper_title": paper_title},
+            include=["documents", "metadatas"],
+        )
+    except Exception as e:
+        logger.warning(f"Could not fetch chunks for '{paper_title}' ({e}).")
+        return None
+    for cid, doc, meta in zip(
+        data.get("ids") or [], data.get("documents") or [], data.get("metadatas") or []
+    ):
+        if (meta or {}).get("chunk_type") == "abstract":
+            return cid, doc, meta or {}
+    return None
+
+
+def query_builder(user_query: str, top_k: int = 15, per_paper_k: Optional[int] = None) -> Tuple[str, list, list]:
+    """Build the LLM prompt for a question, guaranteeing per-paper coverage.
+
+    The old behaviour was one global top-k search: with 5 papers and
+    top_k=15 (or even 30), the chunks of the 2-3 papers whose wording
+    matched the question best filled every slot, so the other papers
+    never reached the LLM at all — and the prompt told it to answer
+    only from context, so it stayed silent about them. Asking about a
+    missing paper by name worked, proving those papers were indexed.
+
+    Now, when more than one paper is indexed, the top_k budget is split
+    evenly across papers (top_k=15, 5 papers -> 3 chunks per paper),
+    and each paper also gets its Abstract chunk if the similarity search
+    did not already pick it up. The total returned can therefore exceed
+    top_k by at most one Abstract chunk per paper; coverage is worth
+    more than an exact budget for a multi-paper question. With a single
+    paper the behaviour is unchanged (one global top-k search).
+    """
     global embedding_model, collection
 
     if embedding_model is None:
@@ -364,59 +424,131 @@ def query_builder(user_query: str, top_k: int = 15) -> Tuple[str, list, list]:
         raise RuntimeError("No indexed documents found in vector store. Please index PDFs first.")
 
     total_in_db = collection.count()
-    actual_top_k = min(top_k, total_in_db) if total_in_db > 0 else top_k
-
-    print(f"[Retrieval] Vector DB contains {total_in_db} total indexed chunks. Searching for top {actual_top_k} most relevant...")
+    print(f"[Retrieval] Vector DB contains {total_in_db} total indexed chunks.")
 
     query_embedding = embedding_model.encode(
         user_query,
         normalize_embeddings=True,
         show_progress_bar=False
     )
+    query_vec = query_embedding.tolist()
 
-    result = collection.query(
-        query_embeddings=query_embedding.tolist(),
-        n_results=actual_top_k,
-        include=["documents", "metadatas"]
-    )
+    # Per-paper retrieval, grouped by paper title.
+    # Each entry: (chunk_id, chunk_text, metadata)
+    per_paper: Dict[str, list] = {}
+    titles = _list_paper_titles(collection) if total_in_db > 0 else []
 
-    ids = result["ids"][0]
-    chunks = result["documents"][0]
-    metas = result["metadatas"][0] if result.get("metadatas") and result["metadatas"] else []
+    if len(titles) <= 1:
+        # Single paper (or listing failed): old global search, unchanged.
+        actual_top_k = min(top_k, total_in_db) if total_in_db > 0 else top_k
+        print(f"[Retrieval] Searching for top {actual_top_k} most relevant...")
+        result = collection.query(
+            query_embeddings=query_vec,
+            n_results=actual_top_k,
+            include=["documents", "metadatas"],
+        )
+        ids = result["ids"][0]
+        chunks = result["documents"][0]
+        metas = result["metadatas"][0] if result.get("metadatas") and result["metadatas"] else []
+        grouped = []
+        for i in range(len(ids)):
+            meta = metas[i] if i < len(metas) and metas[i] else {}
+            title = meta.get("paper_title") or ids[i].split(".pdf")[0].replace("_", " ")
+            grouped.append((title, ids[i], chunks[i], meta))
+        # Group (single title) for the shared prompt builder below.
+        for title, cid, doc, meta in grouped:
+            per_paper.setdefault(title, []).append((cid, doc, meta))
+    else:
+        import math
 
-    sources = []
+        if per_paper_k is None:
+            per_paper_k = max(2, math.ceil(top_k / len(titles)))
+        print(
+            f"[Retrieval] {len(titles)} papers indexed. "
+            f"Fetching top {per_paper_k} chunks per paper "
+            f"(budget top_k={top_k}) ..."
+        )
+        for title in titles:
+            try:
+                result = collection.query(
+                    query_embeddings=query_vec,
+                    n_results=per_paper_k,
+                    where={"paper_title": title},
+                    include=["documents", "metadatas"],
+                )
+            except Exception as e:
+                logger.warning(f"Per-paper query failed for '{title}' ({e}); skipping it.")
+                continue
+            r_ids = result["ids"][0] if result.get("ids") else []
+            r_docs = result["documents"][0] if result.get("documents") else []
+            r_metas = result["metadatas"][0] if result.get("metadatas") and result["metadatas"] else []
+            entries = []
+            for i in range(len(r_ids)):
+                meta = r_metas[i] if i < len(r_metas) and r_metas[i] else {}
+                entries.append((r_ids[i], r_docs[i], meta))
+            # Guarantee the Abstract is in the context for this paper,
+            # even if the similarity search returned nothing for it.
+            if not any((m or {}).get("chunk_type") == "abstract" for _, _, m in entries):
+                abstract = _abstract_chunk_for_paper(collection, title)
+                if abstract is not None:
+                    cid, doc, meta = abstract
+                    if cid not in {e[0] for e in entries}:
+                        entries.insert(0, (cid, doc, meta))
+            if entries:
+                per_paper[title] = entries
+        if not per_paper:
+            # Every per-paper query failed: fall back to one global search
+            # rather than failing the question outright.
+            logger.warning("Per-paper retrieval returned nothing; falling back to global top-k.")
+            actual_top_k = min(top_k, total_in_db) if total_in_db > 0 else top_k
+            result = collection.query(
+                query_embeddings=query_vec,
+                n_results=actual_top_k,
+                include=["documents", "metadatas"],
+            )
+            ids = result["ids"][0]
+            chunks = result["documents"][0]
+            metas = result["metadatas"][0] if result.get("metadatas") and result["metadatas"] else []
+            for i in range(len(ids)):
+                meta = metas[i] if i < len(metas) and metas[i] else {}
+                title = meta.get("paper_title") or ids[i].split(".pdf")[0].replace("_", " ")
+                per_paper.setdefault(title, []).append((ids[i], chunks[i], meta))
+
+    sources = list(per_paper.keys())
+    ids: list = []
     context = ""
-
-    for i in range(len(ids)):
-        meta = metas[i] if i < len(metas) and metas[i] else {}
-        paper_title = meta.get("paper_title")
-        if not paper_title:
-            paper_title = ids[i].split(".pdf")[0].replace("_", " ")
-
-        section_path = meta.get("section_path") or meta.get("section", "Section")
-        chunk_type = meta.get("chunk_type", "body")
-        label = meta.get("label", "")
-
-        if paper_title not in sources:
-            sources.append(paper_title)
-
-        type_header = f" [{label}]" if label else (f" [{chunk_type}]" if chunk_type in ("table", "code", "figure_caption") else "")
-
-        context += f"""
-Paper   : {paper_title}
+    for paper_title, entries in per_paper.items():
+        context += f"\n===== Paper: {paper_title} =====\n"
+        for cid, chunk_text, meta in entries:
+            ids.append(cid)
+            section_path = meta.get("section_path") or meta.get("section", "Section")
+            chunk_type = meta.get("chunk_type", "body")
+            label = meta.get("label", "")
+            type_header = (
+                f" [{label}]"
+                if label
+                else (f" [{chunk_type}]" if chunk_type in ("table", "code", "figure_caption") else "")
+            )
+            context += f"""
 Section : {section_path}{type_header}
-Content : {chunks[i]}
+Content : {chunk_text}
 
 -------"""
+    print(f"[Retrieval] Returning {len(ids)} chunks covering {len(sources)} paper(s): {sources}")
 
     prompt = f"""
-You are an expert research assistance helping researchers and students. 
+You are an expert research assistance helping researchers and students.
 You job is to give precise and clean answer user question clearly and accurately using only the context provided.
 if the answer is not in the context, say sorry can't answer it based on given context.
 You may ask clarifying or counter-questions to deepen understanding.
 
+IMPORTANT: the Context below is grouped by paper, one group per paper.
+Cover EVERY paper in the Context, one section per paper, in the same
+order as they appear. Do not skip a paper. If a paper's chunks do not
+answer the question, say so for that paper instead of skipping it.
 
-User question : 
+
+User question :
 {user_query}
 
 

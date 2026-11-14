@@ -65,6 +65,10 @@ class IndexResult:
     success:   bool
     doc_count: int = 0
     message:   str = ""
+    # Chunks per paper title, so the UI can show that every uploaded
+    # paper actually made it into the index (a paper that parsed to
+    # zero sections used to disappear silently).
+    per_paper: Dict[str, int] = field(default_factory=dict)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -132,9 +136,25 @@ def index_pdfs(pdf_paths: List[str]) -> IndexResult:
         collection.add(**add_kwargs)
         RAG_Pipeline.collection = collection
 
+        # Per-paper chunk counts, so a dropped paper is visible at once.
+        per_paper: Dict[str, int] = {}
+        for c in paper_chunks:
+            per_paper[c["paper_title"]] = per_paper.get(c["paper_title"], 0) + 1
+        counts = ", ".join(f"{t}: {n}" for t, n in per_paper.items())
+        message = f"Indexed {parsed_count} document(s) → {len(all_chunks)} chunks stored. Per paper — {counts}."
+        if parsed_count < len(pdf_paths):
+            # parse_documents_batch silently drops files that parse to
+            # zero sections; say so instead of letting the user find out
+            # only when a question goes unanswered.
+            message += (
+                f" Warning: {len(pdf_paths) - parsed_count} uploaded file(s) "
+                f"produced no readable sections and were skipped."
+            )
+
         return IndexResult(
             success=True, doc_count=parsed_count,
-            message=f"Indexed {parsed_count} document(s) → {len(all_chunks)} chunks stored.",
+            message=message,
+            per_paper=per_paper,
         )
 
     except Exception as exc:
@@ -593,6 +613,9 @@ def do_indexing():
     st.session_state.indexed      = result.success
     st.session_state.indexing     = False
     st.session_state.index_error  = "" if result.success else result.message
+    # Keep the per-paper counts after the rerun, so the sidebar can
+    # show them instead of only "N document(s)".
+    st.session_state.index_message = result.message if result.success else ""
     return result
 
 
@@ -698,7 +721,7 @@ with st.sidebar:
                 st.rerun()
 
         if st.session_state.indexed:
-            st.success(f"✓ Indexed {len(st.session_state.loaded_pdfs)} document(s) — ready to query.")
+            st.success(st.session_state.get("index_message") or f"✓ Indexed {len(st.session_state.loaded_pdfs)} document(s) — ready to query.")
         elif st.session_state.index_error:
             st.error("✗ Indexing failed")
             with st.expander("Show error details", expanded=False):
