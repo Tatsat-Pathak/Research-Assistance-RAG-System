@@ -1,6 +1,6 @@
 # 🔬 AI-Powered Research Assistance RAG System
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://rag-powered-research-assistance.streamlit.app/)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)]
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![ChromaDB](https://img.shields.io/badge/vector--db-ChromaDB-orange.svg)](https://www.trychroma.com/)
 [![Embeddings](https://img.shields.io/badge/embeddings-BAAI%2Fbge--base--en--v1.5-purple.svg)](https://huggingface.co/BAAI/bge-base-en-v1.5)
@@ -11,14 +11,7 @@ A robust, from-scratch **Retrieval-Augmented Generation (RAG)** assistant engine
 
 Instead of relying on rigid high-level abstractions like LangChain or LlamaIndex, the entire RAG pipeline is built **from scratch** to give full programmatic control over layout parsing, academic boundary trimming, structure-aware semantic chunking, and vector retrieval.
 
----
-
-### 🌐 Live Application
-> ⚠️ The Streamlit Cloud deployment linked below is currently returning "not found" for visitors (checked 2026-11-14). It needs to be redeployed — see the hosting notes in the repo history. Run it locally in the meantime (see Getting Started).
-
-👉 **Access the Live Web Assistant:** **[rag-powered-research-assistance.streamlit.app](https://rag-powered-research-assistance.streamlit.app/)**
-
----
+> **No hosted live demo** — run it locally (see Getting Started below).
 
 ## 🏆 Benchmark & Retrieval Evaluation
 
@@ -67,9 +60,9 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 #### 2. Retrieval & Querying Flow
 1. **User Research Question:** The researcher enters a query in the chat interface or selects a suggested research prompt.
 2. **Embed Query Vector:** The user's query is normalized and embedded into a 768-d vector using `BAAI/bge-base-en-v1.5`.
-3. **ChromaDB Vector Search:** Executes an approximate nearest neighbor (ANN) search against indexed vectors.
-4. **Top-K Chunks Retrieved:** Retrieves the most relevant chunks based on the user-configurable Top-K slider (3 to 30 chunks).
-5. **Augmented Prompt Construction (`query_builder`):** Formulates a grounded context window pairing retrieved chunks with document titles, section headers, and strict grounding instructions.
+3. **ChromaDB Vector Search:** Executes an approximate nearest neighbor (ANN) search against indexed vectors. The search is per-paper: the Top-K budget is split evenly across all indexed papers, instead of one global top-K list that a few papers could fill.
+4. **Top-K Chunks Retrieved:** Retrieves the most relevant chunks per paper based on the user-configurable Top-K slider (3 to 30 chunks in total). Each paper's Abstract chunk is also included if the similarity search missed it, so a question like "what does each paper talk about?" gets chunks from every paper, not just the most similar ones.
+5. **Augmented Prompt Construction (`query_builder`):** Formulates a grounded context window pairing retrieved chunks with document titles, section headers, and strict grounding instructions. The context is grouped by paper, and the LLM is instructed to cover every paper, one section per paper, and not skip any.
 6. **LLM Deep Reasoning (`answer_generator`):** Dispatches the prompt to OpenRouter API (default model `nvidia/nemotron-3.5-super-vl:free`, overridable with the `RAG_LLM_MODEL` env var), capturing `<think>...</think>` internal reasoning traces.
 7. **Cited Synthesis & Reasoning Output:** Renders the synthesized response in the dark-themed UI, surfaces clickable source chips (Paper Title + Section Heading), and exposes the reasoning steps in an expandable drawer.
 
@@ -79,7 +72,7 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 
 - **Deep Reasoning Traces:** Full inspection of internal model reasoning steps (`<think>...</think>`) in a collapsible drawer.
 - **Granular Source Citations:** Every response surfaces interactive chips showing the exact document title, section heading, and whether the evidence originated from a table.
-- **Configurable Top-K Slider:** Adjust context breadth from 3 to 30 chunks directly from the sidebar.
+- **Configurable Top-K Slider:** Adjust context breadth from 3 to 30 chunks directly from the sidebar. The budget is split evenly across papers, so every indexed paper is represented in the answer.
 - **Structure-Aware Semantic Chunking:** Chunks respect paragraph and section boundaries, preventing semantic fragmentation.
 - **Instant Ingestion with Caching:** SHA-256 disk cache prevents redundant parsing on repeated files (<1ms reload).
 - **Executive Dark UI:** Custom glassmorphism CSS theme built with Inter typography, animated response bubbles, and clean status indicators.
@@ -91,7 +84,7 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 | Component | Technology | Role |
 | :--- | :--- | :--- |
 | **Frontend UI** | [Streamlit](https://streamlit.io/) | Reactive web application with custom CSS styling |
-| **Document Parsing** | `pymupdf4llm` / MinerU | Layout-aware structural markdown & table extraction |
+| **Document Parsing** | `MinerU` | Layout-aware structural markdown & table extraction | 
 | **Embedding Model** | `BAAI/bge-base-en-v1.5` | 768-dimensional normalized dense semantic representations |
 | **Vector Database** | [ChromaDB](https://www.trychroma.com/) | Persistent local vector client with cosine distance indexing |
 | **LLM Backend** | OpenRouter API | Reasoning model (`nvidia/nemotron-3.5-super-vl:free` by default; set `RAG_LLM_MODEL` to change it) |
@@ -119,7 +112,7 @@ Create a `.env` file in the root directory:
 ```env
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
-Or set it as a secret on Streamlit Cloud (`OPENROUTER_API_KEY` in Secrets). There is deliberately no key input in the app UI — the key must never be typed into, or displayed by, the interface. Without a key, uploading and indexing still work, but asking questions will show a clear "no API key set" error instead of a cryptic API failure.
+Or set `OPENROUTER_API_KEY` in your host's secrets / environment variables if you deploy it yourself. There is deliberately no key input in the app UI — the key must never be typed into, or displayed by, the interface. Without a key, uploading and indexing still work, but asking questions will show a clear "no API key set" error instead of a cryptic API failure.
 
 ### 4. Run Locally
 ```bash
