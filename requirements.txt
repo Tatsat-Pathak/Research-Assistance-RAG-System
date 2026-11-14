@@ -1,8 +1,9 @@
 streamlit
-sentence-transformers
 chromadb
-openai
+mineru                                   
+python-multipart
+sentence-transformers
 requests
 python-dotenv
-loguru
-pydantic
+fastapi
+uvicorn[standard]
