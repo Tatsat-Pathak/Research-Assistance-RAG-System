@@ -4,7 +4,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![ChromaDB](https://img.shields.io/badge/vector--db-ChromaDB-orange.svg)](https://www.trychroma.com/)
 [![Embeddings](https://img.shields.io/badge/embeddings-BAAI%2Fbge--base--en--v1.5-purple.svg)](https://huggingface.co/BAAI/bge-base-en-v1.5)
-[![LLM](https://img.shields.io/badge/LLM-Nemotron%20%7C%20DeepSeek-green.svg)](https://openrouter.ai/)
+[![LLM](https://img.shields.io/badge/LLM-Nemotron%203.5-green.svg)](https://openrouter.ai/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A robust, from-scratch **Retrieval-Augmented Generation (RAG)** assistant engineered specifically for academic researchers and students. This application allows users to upload PDF research papers and ask nuanced, high-level or fine-grained questions, receiving synthesized, context-aware answers complete with **direct section citations** and **deep reasoning traces**.
@@ -14,6 +14,8 @@ Instead of relying on rigid high-level abstractions like LangChain or LlamaIndex
 ---
 
 ### 🌐 Live Application
+> ⚠️ The Streamlit Cloud deployment linked below is currently returning "not found" for visitors (checked 2026-11-14). It needs to be redeployed — see the hosting notes in the repo history. Run it locally in the meantime (see Getting Started).
+
 👉 **Access the Live Web Assistant:** **[rag-powered-research-assistance.streamlit.app](https://rag-powered-research-assistance.streamlit.app/)**
 
 ---
@@ -39,6 +41,8 @@ The RAG retrieval engine was systematically evaluated and benchmarked across **4
 | **Average Search Latency** | **30.25 ms** | Real-time cosine similarity search across 2,084 768-d embeddings |
 | **Disk Cache Ingestion Speed** | **< 1.00 ms** | SHA-256 disk hashing eliminates redundant parsing |
 
+> Note: these figures are from the author's local evaluation. The evaluation script and data are not in this repo, so the numbers can't be reproduced from here alone.
+
 ---
 
 ## 📐 System Architecture
@@ -53,10 +57,10 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 
 #### 1. Ingestion & Indexing Flow
 1. **Upload PDF Files:** Multi-file drag-and-drop ingestion via the Streamlit interface with persistent disk caching.
-2. **Layout Parsing & OCR:** Converts complex PDF documents into structured Markdown while preserving tables and section hierarchies via MinerU layout analysis.
-3. **Academic Trimming (`paper_triming`):** Intelligent regex heuristics locate the start of "Abstract" or "Introduction" and the start of "Conclusion" or "References". Non-core boilerplate (cover pages, headers, footers, references, and appendices) is stripped to prevent the LLM from hallucinating on citation lists.
-4. **Extract Sections & Tables (`getting_content_between_headers`):** Structures text strictly under its parent Markdown section heading and isolates tabular markdown data.
-5. **Structure-Aware Chunking (`chunks_generation`):** Generates overlapping 500-character chunks with sentence boundary preservation. Each chunk is tagged with its parent section heading, preventing chunks from bleeding across different headers.
+2. **Layout Parsing (MinerU):** Each PDF is parsed with `MinerUParser` (`basic` tier) into typed blocks — headings, text, equations, tables, figures, code — in reading order, via `doc.structured_content()`. No markdown is involved at this step. If MinerU is unavailable, the fallback is `pymupdf4llm` markdown.
+3. **Academic Trimming (inside `extract_paper` in `extract_papers.py`):** Cover pages, headers, footers and front matter are dropped; content is kept from the Abstract/Introduction through the Conclusion, stopping at References, acknowledgments or appendices, so the LLM doesn't hallucinate on citation lists.
+4. **Extract Sections & Tables (`extract_paper` in `extract_papers.py`):** `blocks_from_structured()` flattens the `structured_content()` blocks into one list, and `extract_paper()` files each block under its parent section heading — rejoining paragraphs split across columns/pages and assigning each table/figure to the section that discusses it most, instead of the one that merely precedes it.
+5. **Structure-Aware Chunking (`chunks_generation`):** Generates overlapping ~300-word chunks with sentence boundary preservation. Each chunk is tagged with its parent section heading, preventing chunks from bleeding across different headers. The size is set in `app.py` (`chunk_size=300`, in words) and is passed through to `chunks_generated.py`.
 6. **Dense Vector Embeddings (`create_embedding_text`):** Transforms chunks into normalized 768-dimensional dense vectors using the state-of-the-art `BAAI/bge-base-en-v1.5` model.
 7. **ChromaDB Vector Store (`initialize_vector_database`):** Chunks, embeddings, and document IDs are stored persistently in a local ChromaDB collection using cosine similarity scoring.
 
@@ -66,7 +70,7 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 3. **ChromaDB Vector Search:** Executes an approximate nearest neighbor (ANN) search against indexed vectors.
 4. **Top-K Chunks Retrieved:** Retrieves the most relevant chunks based on the user-configurable Top-K slider (3 to 30 chunks).
 5. **Augmented Prompt Construction (`query_builder`):** Formulates a grounded context window pairing retrieved chunks with document titles, section headers, and strict grounding instructions.
-6. **LLM Deep Reasoning (`answer_generator`):** Dispatches the prompt to OpenRouter API (`nvidia/nemotron-3-ultra-550b-a55b:free` or DeepSeek), capturing `<think>...</think>` internal reasoning traces.
+6. **LLM Deep Reasoning (`answer_generator`):** Dispatches the prompt to OpenRouter API (default model `nvidia/nemotron-3.5-super-vl:free`, overridable with the `RAG_LLM_MODEL` env var), capturing `<think>...</think>` internal reasoning traces.
 7. **Cited Synthesis & Reasoning Output:** Renders the synthesized response in the dark-themed UI, surfaces clickable source chips (Paper Title + Section Heading), and exposes the reasoning steps in an expandable drawer.
 
 ---
@@ -90,7 +94,7 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 | **Document Parsing** | `pymupdf4llm` / MinerU | Layout-aware structural markdown & table extraction |
 | **Embedding Model** | `BAAI/bge-base-en-v1.5` | 768-dimensional normalized dense semantic representations |
 | **Vector Database** | [ChromaDB](https://www.trychroma.com/) | Persistent local vector client with cosine distance indexing |
-| **LLM Backend** | OpenRouter API | High-parameter reasoning models (`nvidia/nemotron-3-ultra-550b-a55b:free` / DeepSeek) |
+| **LLM Backend** | OpenRouter API | Reasoning model (`nvidia/nemotron-3.5-super-vl:free` by default; set `RAG_LLM_MODEL` to change it) |
 | **Environment** | Python 3.10+ | Core execution runtime |
 
 ---
@@ -115,7 +119,7 @@ Create a `.env` file in the root directory:
 ```env
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
-*(Alternatively, enter your key inside the Streamlit sidebar under **Settings**).*
+Or set it as a secret on Streamlit Cloud (`OPENROUTER_API_KEY` in Secrets). There is deliberately no key input in the app UI — the key must never be typed into, or displayed by, the interface. Without a key, uploading and indexing still work, but asking questions will show a clear "no API key set" error instead of a cryptic API failure.
 
 ### 4. Run Locally
 ```bash
@@ -131,11 +135,18 @@ Open your browser at `http://localhost:8501`, drop your PDF papers into the side
 Research-Assistance-RAG-System/
 ├── app.py                     # Streamlit frontend with custom dark theme & reasoning UI
 ├── RAG_Pipeline.py            # Core RAG logic: parsing, chunking, embedding & OpenRouter LLM
+├── extract_papers.py          # Section/table/equation extraction from MinerU structured output
+├── chunks_generated.py        # Structure-aware chunking (~300-word chunks, section paths)
 ├── rag_architecture.png       # High-resolution system architecture diagram
-├── requirements.txt           # Lightweight production dependencies for Streamlit Cloud
+├── requirements.txt           # Pinned/bounded production dependencies
+├── LICENSE                    # MIT License
 ├── .gitignore                 # Excludes caches, vector databases, and private PDFs
 └── README.md                  # Project documentation & benchmark evaluation results
 ```
+
+### Hosting notes
+- PDFs are parsed **sequentially by default** (one document at a time). Each parallel MinerU worker loads its own copy of the parser models, so parallel parsing can use several times the RAM and crash a small host. Set `RAG_MAX_WORKERS=2` only on a host with RAM to spare.
+- Uploaded PDFs, the parse cache, and the ChromaDB index live in local folders (`uploaded_pdfs/`, `parse_cache/`, `upload_pdfs_chroma_db/`) and are **not persistent** on hosted platforms that wipe disk on restart/sleep — after a cold start, papers must be uploaded and indexed again.
 
 ---
 

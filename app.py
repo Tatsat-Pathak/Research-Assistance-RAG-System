@@ -92,8 +92,8 @@ def index_pdfs(pdf_paths: List[str]) -> IndexResult:
             return IndexResult(success=False, doc_count=0,
                                message="No readable sections found in the uploaded PDFs.")
 
-        # 2. Generate chunks
-        paper_chunks = chunks_generation(papers_section_heading, chunk_size=500)
+        # 2. Generate chunks (~300 words each; see chunks_generated.py)
+        paper_chunks = chunks_generation(papers_section_heading, chunk_size=300)
 
         # 3. Flatten
         all_chunks, all_ids = combining_chunks(paper_chunks)
@@ -489,6 +489,24 @@ init_state()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# OPENROUTER API KEY — server-side only, never shown in the UI.
+# On Streamlit Cloud the key lives in Secrets; locally it lives in .env.
+# It is copied into the environment here so RAG_Pipeline.answer_generator()
+# can read it. There is deliberately no key input box anywhere in the UI:
+# anything typed into the app would be visible to whoever is looking at
+# the screen, and on a shared deployment a typed key must never be the
+# way the owner's key gets in.
+# ─────────────────────────────────────────────────────────────────────────────
+try:
+    _secret_key = st.secrets.get("OPENROUTER_API_KEY", "") or ""
+except Exception:
+    _secret_key = ""
+if _secret_key.strip():
+    os.environ["OPENROUTER_API_KEY"] = _secret_key.strip()
+    os.environ["OPEN_ROUTER_API_KEY"] = _secret_key.strip()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # UI RENDERING HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 def fmt_bytes(n: int) -> str:
@@ -707,7 +725,7 @@ with st.sidebar:
     st.markdown(f"""
     <div style="margin-top:20px; color:#484f58; font-size:0.72rem; padding:8px 0;">
         Session · {st.session_state.session_id}<br>
-        Backend · OpenRouter Nemotron / DeepSeek<br>
+        Backend · OpenRouter Nemotron 3.5<br>
         Embedding · BAAI/bge-base-en-v1.5
     </div>
     """, unsafe_allow_html=True)

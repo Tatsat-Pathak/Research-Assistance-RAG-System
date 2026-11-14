@@ -1,9 +1,13 @@
-streamlit
-chromadb
-mineru
-sentence-transformers
-openai
-requests
-python-dotenv
-loguru
-pydantic
+# Pinned / bounded so a fresh install reproduces the tested stack instead of
+# silently pulling a breaking major version. mineru is pinned exactly:
+# RAG_Pipeline.py uses its internal MinerUParser API, verified on 4.0.12.
+# pymupdf4llm is required: it is the fallback parser in RAG_Pipeline.py
+# when MinerU is unavailable. loguru / pydantic / requests were removed —
+# nothing in the codebase imports them.
+streamlit>=1.40,<2
+chromadb>=0.5,<2
+mineru==4.0.12
+sentence-transformers>=3.0,<7
+openai>=1.0,<4
+pymupdf4llm>=0.0.20,<2
+python-dotenv>=1.0,<2

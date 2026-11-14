@@ -167,9 +167,29 @@ def parse_documents_batch(file_paths: List[str], max_workers: Optional[int] = No
         return {key: sections} if sections else {}
 
     if max_workers is None:
-        cpu_count = os.cpu_count() or 4
-        # Keep worker count balanced for 8GB VRAM and system memory
-        max_workers = min(cpu_count, len(file_paths), 4)
+        # Default is sequential (1 worker). Each worker process loads its own
+        # copy of the MinerU parser + models, so 4 workers can use ~4x the RAM
+        # and OOM a small host (Streamlit Cloud caps at ~2.7 GB). That was the
+        # repeated crash. Raise it only on a host with RAM to spare, via
+        # RAG_MAX_WORKERS=2, and never above 2.
+        try:
+            max_workers = int(os.getenv("RAG_MAX_WORKERS", "1"))
+        except ValueError:
+            max_workers = 1
+        max_workers = max(1, min(max_workers, 2, len(file_paths)))
+
+    if max_workers == 1:
+        results: Dict[str, list] = {}
+        for i, p in enumerate(file_paths, 1):
+            try:
+                file_name, title, sections = parse_document(p)
+                if sections:
+                    key = title if title and title != "untitled" else file_name
+                    results[key] = sections
+                    print(f"[{i}/{len(file_paths)}] Parsed '{file_name}' ({len(sections)} sections)")
+            except Exception as exc:
+                logger.error(f"Failed to parse {p}: {exc}")
+        return results
 
     results: Dict[str, list] = {}
     ctx = multiprocessing.get_context("spawn")
@@ -195,17 +215,21 @@ def parse_documents_batch(file_paths: List[str], max_workers: Optional[int] = No
 # ─────────────────────────────────────────────────────────────────────────────
 # Semantic Chunking (chunks_generated)
 # ─────────────────────────────────────────────────────────────────────────────
-def chunks_generation(papers_section_heading: dict, chunk_size: int = 500) -> list:
+def chunks_generation(papers_section_heading: dict, chunk_size: int = 300) -> list:
     """
     Generate hierarchical semantic chunks with section paths, equation support,
     table row splitting, and sentence-overlap packing.
-    
+
+    chunk_size is the target size of a prose chunk, in words. It is passed
+    through to chunk_papers() — previously it was accepted here and silently
+    ignored (chunking always used its own hardcoded 300-word target).
+
     Accepts:
         {paper_title_or_filename: sections_dict}
     Returns:
         List of chunk dicts
     """
-    return chunk_papers(papers_section_heading)
+    return chunk_papers(papers_section_heading, target_words=chunk_size)
 
 
 def combining_chunks(paper_chunks) -> Tuple[list, list]:
@@ -409,6 +433,15 @@ def answer_generator(prompt: str) -> dict:
     load_dotenv()
     api_key = os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     llm_model = os.getenv("RAG_LLM_MODEL", "nvidia/nemotron-3.5-super-vl:free")
+
+    if not api_key:
+        return {
+            "success": False,
+            "content": None,
+            "reasoning": None,
+            "error": "No OpenRouter API key set. Set OPENROUTER_API_KEY in a .env file "
+                     "or in Streamlit secrets, then ask again.",
+        }
 
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
