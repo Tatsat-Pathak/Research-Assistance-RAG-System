@@ -1,5 +1,7 @@
 streamlit
 chromadb
-mineru
+pymupdf4llm
 sentence-transformers
 python-dotenv
+openai
+requests

@@ -7,3 +7,7 @@ __pycache__/
 *.bin
 .env
 .DS_Store
+.venv/
+.codelens/
+.vscode/
+.agents/
