@@ -53,7 +53,7 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 
 #### 1. Ingestion & Indexing Flow
 1. **Upload PDF Files:** Multi-file drag-and-drop ingestion via the Streamlit interface with persistent disk caching.
-2. **Layout Parsing & OCR:** Converts complex PDF documents into structured Markdown while preserving tables and section hierarchies via `pymupdf4llm` / MinerU layout analysis.
+2. **Layout Parsing & OCR:** Converts complex PDF documents into structured Markdown while preserving tables and section hierarchies via MinerU layout analysis.
 3. **Academic Trimming (`paper_triming`):** Intelligent regex heuristics locate the start of "Abstract" or "Introduction" and the start of "Conclusion" or "References". Non-core boilerplate (cover pages, headers, footers, references, and appendices) is stripped to prevent the LLM from hallucinating on citation lists.
 4. **Extract Sections & Tables (`getting_content_between_headers`):** Structures text strictly under its parent Markdown section heading and isolates tabular markdown data.
 5. **Structure-Aware Chunking (`chunks_generation`):** Generates overlapping 500-character chunks with sentence boundary preservation. Each chunk is tagged with its parent section heading, preventing chunks from bleeding across different headers.
@@ -79,7 +79,6 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 - **Structure-Aware Semantic Chunking:** Chunks respect paragraph and section boundaries, preventing semantic fragmentation.
 - **Instant Ingestion with Caching:** SHA-256 disk cache prevents redundant parsing on repeated files (<1ms reload).
 - **Executive Dark UI:** Custom glassmorphism CSS theme built with Inter typography, animated response bubbles, and clean status indicators.
-- **API Key Flexibility:** Uses pre-configured environment secrets or allows visitors to enter their own OpenRouter API key directly in the sidebar.
 
 ---
 

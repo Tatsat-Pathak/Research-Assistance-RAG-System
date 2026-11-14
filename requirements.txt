@@ -1,9 +1,5 @@
 streamlit
 chromadb
-mineru                                   
-python-multipart
+mineru
 sentence-transformers
-requests
 python-dotenv
-fastapi
-uvicorn[standard]
