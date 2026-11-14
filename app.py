@@ -1,7 +1,7 @@
 """
 app.py — Research RAG Assistant · Streamlit UI
 =================================================
-Modern, reactive Streamlit interface for academic research assistance.
+Modern, reactive Streamlit interface for Hugging Face Spaces & local execution.
 """
 import os
 import sys
@@ -15,10 +15,18 @@ from typing import List, Optional, Dict
 
 import streamlit as st
 
+# Ensure deployment directory is on sys.path
+current_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(current_dir))
+
+# Disable ChromaDB anonymous telemetry
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
 # Direct imports from local RAG_Pipeline
 import RAG_Pipeline
 from RAG_Pipeline import (
     parse_document,
+    parse_documents_batch,
     chunks_generation,
     combining_chunks,
     load_embedded_model,
@@ -75,14 +83,9 @@ def _get_chroma_client():
 # ─────────────────────────────────────────────────────────────────────────────
 def index_pdfs(pdf_paths: List[str]) -> IndexResult:
     try:
-        # 1. Parse PDFs
-        papers_section_heading: Dict[str, list] = {}
-        parsed_count = 0
-        for path in pdf_paths:
-            file_name, _, sections = parse_document(path)
-            if sections:
-                papers_section_heading[file_name] = sections
-                parsed_count += 1
+        # 1. Parse PDFs in parallel using multiprocessing
+        papers_section_heading = parse_documents_batch(pdf_paths)
+        parsed_count = len(papers_section_heading)
 
         if not papers_section_heading:
             return IndexResult(success=False, doc_count=0,
@@ -116,12 +119,16 @@ def index_pdfs(pdf_paths: List[str]) -> IndexResult:
 
         collection = initialize_collections(client)
 
-        # 6. Store in ChromaDB
-        collection.add(
-            ids=all_ids,
-            documents=all_chunks,
-            embeddings=embeddings.tolist(),
-        )
+        # 6. Store in ChromaDB with metadata
+        add_kwargs = {
+            "ids": all_ids,
+            "documents": all_chunks,
+            "embeddings": embeddings.tolist(),
+        }
+        if getattr(RAG_Pipeline, "last_metadatas", None):
+            add_kwargs["metadatas"] = RAG_Pipeline.last_metadatas
+
+        collection.add(**add_kwargs)
         RAG_Pipeline.collection = collection
 
         return IndexResult(
@@ -140,9 +147,11 @@ def index_pdfs(pdf_paths: List[str]) -> IndexResult:
 # ─────────────────────────────────────────────────────────────────────────────
 def ask(question: str, top_k: int = 15, pdf_paths=None, chat_history=None) -> AskResult:
     try:
+        # Ensure embedding model is loaded
         if not hasattr(RAG_Pipeline, "embedding_model") or RAG_Pipeline.embedding_model is None:
             RAG_Pipeline.embedding_model = _get_embedding_model()
 
+        # Ensure collection is loaded
         if not hasattr(RAG_Pipeline, "collection") or RAG_Pipeline.collection is None:
             client = _get_chroma_client()
             try:
@@ -157,7 +166,7 @@ def ask(question: str, top_k: int = 15, pdf_paths=None, chat_history=None) -> As
         # 1. Build prompt + retrieve context
         prompt, source_titles, chunk_ids = query_builder(question, top_k=top_k)
 
-        # 2. Generate answer
+        # 2. Generate answer with OpenRouter LLM
         answer = answer_generator(prompt)
 
         if not answer.get('success'):
@@ -166,39 +175,56 @@ def ask(question: str, top_k: int = 15, pdf_paths=None, chat_history=None) -> As
         answer_content = answer.get('content', '') or ''
         reasoning_trace = answer.get('reasoning', '') or ''
 
-        # 3. Build Source objects from chunk IDs
+        # 3. Build Source objects from metadata or chunk IDs
         sources: List[Source] = []
         seen_ids: set = set()
+
+        id_to_meta = {}
+        try:
+            coll_data = RAG_Pipeline.collection.get(ids=chunk_ids, include=["metadatas"])
+            if coll_data and coll_data.get("ids") and coll_data.get("metadatas"):
+                for mid, mdata in zip(coll_data["ids"], coll_data["metadatas"]):
+                    if mdata:
+                        id_to_meta[mid] = mdata
+        except Exception:
+            pass
 
         for cid in chunk_ids:
             if cid in seen_ids:
                 continue
             seen_ids.add(cid)
 
-            pdf_marker = cid.find(".pdf")
-            if pdf_marker != -1:
-                doc_title = cid[:pdf_marker + 4]
-                remainder = cid[pdf_marker + 5:]
+            meta = id_to_meta.get(cid)
+            if meta and meta.get("paper_title"):
+                doc_title_clean = meta["paper_title"]
+                section_heading = meta.get("section_path") or meta.get("section", "N/A")
+                is_table = meta.get("chunk_type") == "table"
             else:
-                doc_title = cid
-                remainder = ""
+                pdf_marker = cid.find(".pdf")
+                if pdf_marker != -1:
+                    doc_title = cid[:pdf_marker + 4]
+                    remainder = cid[pdf_marker + 5:]
+                else:
+                    doc_title = cid
+                    remainder = ""
 
-            chunk_marker = remainder.rfind("_chunk_")
-            if chunk_marker != -1:
-                before_chunk = remainder[:chunk_marker]
-                last_underscore = before_chunk.rfind("_")
-                section_heading = before_chunk[:last_underscore] if last_underscore != -1 else before_chunk
-            else:
-                section_heading = remainder
+                chunk_marker = remainder.rfind("_chunk_")
+                if chunk_marker != -1:
+                    before_chunk = remainder[:chunk_marker]
+                    last_underscore = before_chunk.rfind("_")
+                    section_heading = before_chunk[:last_underscore] if last_underscore != -1 else before_chunk
+                else:
+                    section_heading = remainder
 
-            section_heading = section_heading.replace("_", " ").strip()
-            doc_title_clean = doc_title.replace("_", " ").replace(".pdf", "").strip()
+                section_heading = section_heading.replace("_", " ").strip()
+                doc_title_clean = doc_title.replace("_", " ").replace(".pdf", "").strip()
+                is_table = "table" in cid.lower()
 
             sources.append(Source(
                 doc_title       = doc_title_clean if doc_title_clean else "Research Paper",
                 section_heading = section_heading if section_heading else "N/A",
                 similarity      = 0.0,
-                is_table        = "table" in cid.lower(),
+                is_table        = is_table,
                 snippet         = "",
             ))
 
@@ -672,6 +698,9 @@ with st.sidebar:
             "Show source citations", value=st.session_state.get("show_sources", True),
             help="Display which papers and sections were used to answer."
         )
+        if custom_key:
+            os.environ["OPENROUTER_API_KEY"] = custom_key
+            os.environ["OPEN_ROUTER_API_KEY"] = custom_key
 
         if st.button("🧹 Clear Chat History", key="btn_clear_chat", use_container_width=True):
             st.session_state.messages     = []

@@ -1,155 +1,255 @@
-import re
 import os
+import re
 import json
+import hashlib
 import logging
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional, Any
+
 import chromadb
+import torch
 from openai import OpenAI
-import glob as g
-import pymupdf4llm as p
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 
+from mineru.parser.mineru_parser import MinerUParser
+
+from extract_papers import extract_paper, blocks_from_structured
+from chunks_generated import chunk_papers
+
 logger = logging.getLogger(__name__)
 
-# Disable ChromaDB anonymous telemetry
-os.environ["ANONYMIZED_TELEMETRY"] = "False"
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration & Hardware / GPU Detection
+# ─────────────────────────────────────────────────────────────────────────────
 CHROMA_PATH = "./upload_pdfs_chroma_db"
 COLLECTION_NAME = "chroma_db_documents"
+PARSE_CACHE_DIR = Path(os.getenv("RAG_PARSE_CACHE_DIR", "./parse_cache"))
+PARSE_CACHE_DIR.mkdir(exist_ok=True)
 
+def get_device() -> str:
+    """Return 'cuda' if NVIDIA GPU is available and functional, else 'cpu'."""
+    try:
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+# Configure MinerU table engine device preference
+os.environ.setdefault("MINERU_TABLE_DEVICE", "auto")
+
+# Injected at runtime by api.py / app.py
 embedding_model = None
 collection = None
+last_metadatas = None
+
+_mineru_parser: Optional[MinerUParser] = None
 
 
-def clean_paper(paper: str):
-    paper = re.sub(r"^>.*\n", "", paper, flags=re.MULTILINE)
-    paper = re.sub(r"^\*\*==>.*<==\*\*", " ", paper, flags=re.MULTILINE)
-    paper = re.sub(r"\*\*----- Start of picture text -----\*\*.*?\*\*----- End of picture text -----\*\*", " ", paper, flags=re.DOTALL | re.IGNORECASE)
-    return paper
+def get_mineru_parser(tier: str = "basic"):
+    """Singleton helper to initialize MinerUParser once per process."""
+    global _mineru_parser
+    if _mineru_parser is None:
+        if MinerUParser is not None:
+            _mineru_parser = MinerUParser(
+                tier=tier,
+                parse_mode="auto",
+                image_analysis=False
+            )
+        else:
+            raise RuntimeError("MinerU is not installed in this environment. Pre-indexed collections remain fully searchable.")
+    return _mineru_parser
 
 
-def paper_triming(paper_section_heading: list):
-    abstract = re.compile(r"abstract|\bIntroduction", flags=re.IGNORECASE)
-    conclusion = re.compile(r"\bconclu[a-z]*\b", flags=re.IGNORECASE)
-    before_references = re.compile(r"references\b", flags=re.IGNORECASE)
+def compute_file_hash(file_path: str) -> str:
+    """Compute SHA-256 hash of a file for cache invalidation."""
+    hasher = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Document Parsing & Extraction (MinerU + extract_papers)
+# ─────────────────────────────────────────────────────────────────────────────
+def parse_document(file_path: str, parser: Optional[MinerUParser] = None) -> Tuple[str, str, Dict[str, list]]:
+    """
+    Parse a PDF file using MinerU with disk-caching support.
     
-    start_flag = False
-    end_flag = False
-    num_of_headings = len(paper_section_heading)
-    start_index = 0
-    end_index = num_of_headings 
-    for index, heading in enumerate(paper_section_heading):
-        header = heading["heading"]
-        if not start_flag:
-            if abstract.search(header):
-                start_index = index
-                start_flag = True
-        elif not end_flag:
-            if conclusion.search(header):
-                end_index = index + 1 if (index + 1) < num_of_headings else index 
-                end_flag = True
-            elif before_references.search(header):
-                end_index = index
-                end_flag = True
-    paper_section_heading = paper_section_heading[start_index:end_index + 1]
-    return paper_section_heading
-
-
-def getting_content_between_headers(paper: str, paper_section_heading: list):
-    size = len(paper_section_heading)
-    for i in range(size):
-        if i < (size - 1):
-            j = i + 1
-            header = paper_section_heading[i]['heading']
-            header_index = paper_section_heading[i]['end_index'] + 1
-            next_header = paper_section_heading[j]['start_index']
-            text = [sentence.strip().replace("\n", "") + "." for sentence in paper[header_index:next_header].split('.') if sentence.strip() != ""]
-            section_size = len(' '.join(text))
-            if text:
-                paper_section_heading[i]['content'] = text
-                paper_section_heading[i]['content size'] = section_size
-    return paper_section_heading[:-1]
-
-
-def parse_document(file_path: str):
+    Returns:
+        (file_name, document_title, sections_dict)
+    """
     file_name = os.path.basename(file_path)
-    document = p.to_markdown(file_path, header=False, footer=False, use_ocr=False)
-    document = clean_paper(document)
-    paper_section_heading = [
-        {
-            "heading": match.group(1).strip(),
-            "start_index": match.start(),
-            "end_index": match.end()
-        }
-        for match in re.finditer(r"^#+\s?[\*_]*([I{1,3}VXa-z0-9:\-. ]+)[\*_]*", document, re.MULTILINE | re.IGNORECASE)
-        if match.group(1).strip() != ''
-    ]
-    paper_section_heading = paper_triming(paper_section_heading)
-    paper_section_heading = getting_content_between_headers(document, paper_section_heading)
+    fallback_title = os.path.splitext(file_name)[0]
 
-    return file_name, document, paper_section_heading
+    # Check parse cache
+    file_hash = compute_file_hash(file_path)
+    cache_file = PARSE_CACHE_DIR / f"{file_hash}_mineru.json"
 
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            title = cached.get("title", fallback_title)
+            sections = cached.get("sections", {})
+            return file_name, title, sections
+        except Exception as e:
+            logger.warning(f"Failed reading cache for {file_name}: {e}. Reparsing...")
 
-def chunks_generation(papers_section_heading: dict, chunk_size: int = 500):
-    paper_chunks = {}
+    # Run MinerU parser
+    if parser is None:
+        parser = get_mineru_parser()
 
-    for title, contents in papers_section_heading.items():
-        chunks = []
-        ids = []
-        s = 0
-        for section in contents:
-            i = 0
-            if "content" in section.keys():
-                heading = section['heading']
-                chunk = f"{heading}\n\n"
-                list_size = len(section['content'])
-                for index, sentence in enumerate(section['content']):
-                    last_index = index + 1
-                    sentence_size = len(sentence)
-                    current_size = len(chunk)
-                        
-                    if current_size + sentence_size < chunk_size and chunk:
-                        current_size += sentence_size
-                        chunk += sentence + " "
-                    else:
-                        chunks.append(chunk)
-                        ids.append(f"{title}_{heading}_{s}_chunk_{i}")
-                        chunk = f"{heading}\n\n" + section['content'][index - 1] + " " + sentence + " "
-                        i += 1
+    doc = parser.parse(file_path)
+    blocks = blocks_from_structured(doc.structured_content())
+    title, sections, extras = extract_paper(blocks, fallback_title=fallback_title)
 
-                    if last_index == list_size and chunk:
-                        chunks.append(chunk)
-                        ids.append(f"{title}_{heading}_{s}_chunk_{i}")
-                        i += 1
+    # Save to disk cache
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "title": title,
+                "sections": sections,
+                "extras": extras
+            }, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed writing cache for {file_name}: {e}")
 
-                s += 1 
-
-        paper_chunks[title] = {
-            'chunks': chunks,
-            'ids': ids
-        }
-
-    return paper_chunks
+    return file_name, title, sections
 
 
-def combining_chunks(papers_chunks_dic: dict):
+def _parse_single_doc_worker(file_path: str) -> Tuple[str, str, Dict[str, list]]:
+    """Top-level worker function for ProcessPoolExecutor."""
+    return parse_document(file_path)
+
+
+def parse_documents_batch(file_paths: List[str], max_workers: Optional[int] = None) -> Dict[str, list]:
+    """
+    Parses multiple PDF files in parallel using ProcessPoolExecutor with spawn context.
+    
+    Returns:
+        Dictionary of {document_title_or_filename: sections_dict}
+    """
+    if not file_paths:
+        return {}
+
+    # Single-file shortcut (no process pool overhead)
+    if len(file_paths) == 1:
+        file_name, title, sections = parse_document(file_paths[0])
+        key = title if title and title != "untitled" else file_name
+        return {key: sections} if sections else {}
+
+    if max_workers is None:
+        cpu_count = os.cpu_count() or 4
+        # Keep worker count balanced for 8GB VRAM and system memory
+        max_workers = min(cpu_count, len(file_paths), 4)
+
+    results: Dict[str, list] = {}
+    ctx = multiprocessing.get_context("spawn")
+    completed = 0
+    total = len(file_paths)
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
+        future_to_path = {executor.submit(_parse_single_doc_worker, p): p for p in file_paths}
+        for future in as_completed(future_to_path):
+            p = future_to_path[future]
+            completed += 1
+            try:
+                file_name, title, sections = future.result()
+                if sections:
+                    key = title if title and title != "untitled" else file_name
+                    results[key] = sections
+                    print(f"[{completed}/{total}] Parsed '{file_name}' ({len(sections)} sections)")
+            except Exception as exc:
+                logger.error(f"Failed to parse {p} in worker: {exc}")
+
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Semantic Chunking (chunks_generated)
+# ─────────────────────────────────────────────────────────────────────────────
+def chunks_generation(papers_section_heading: dict, chunk_size: int = 500) -> list:
+    """
+    Generate hierarchical semantic chunks with section paths, equation support,
+    table row splitting, and sentence-overlap packing.
+    
+    Accepts:
+        {paper_title_or_filename: sections_dict}
+    Returns:
+        List of chunk dicts
+    """
+    return chunk_papers(papers_section_heading)
+
+
+def combining_chunks(paper_chunks) -> Tuple[list, list]:
+    """
+    Flatten and prepare chunks for embedding and ChromaDB indexing.
+    
+    Supports both:
+      - Upgraded list of chunk dictionaries from chunk_papers
+      - Legacy dict {title: {'chunks': ..., 'ids': ...}}
+    """
+    global last_metadatas
+
+    if isinstance(paper_chunks, list):
+        all_chunks = [c["embed_text"] for c in paper_chunks]
+        all_ids = [c["chunk_id"] for c in paper_chunks]
+        last_metadatas = [
+            {
+                "paper_title": c["paper_title"],
+                "section": c["section"],
+                "section_path": " > ".join(c["section_path"]) if isinstance(c["section_path"], list) else str(c["section_path"]),
+                "chunk_type": c.get("chunk_type", "body"),
+                "label": c.get("label", "") or "",
+            }
+            for c in paper_chunks
+        ]
+        return all_chunks, all_ids
+
+    # Legacy dictionary handling
     all_chunks = []
     all_ids = []
-    for title in papers_chunks_dic.keys():
-        chunks = papers_chunks_dic[title]['chunks']
-        ids = papers_chunks_dic[title]['ids']
+    for title, data in paper_chunks.items():
+        chunks = data["chunks"]
+        ids = data["ids"]
         for i in range(len(chunks)):
             all_chunks.append(chunks[i])
             all_ids.append(ids[i])
-    
+
+    last_metadatas = [
+        {"paper_title": cid.split(".pdf")[0], "section": "N/A", "section_path": "N/A", "chunk_type": "body", "label": ""}
+        for cid in all_ids
+    ]
     return all_chunks, all_ids
 
 
-def load_embedded_model(model_name: str = "BAAI/bge-base-en-v1.5"):
-    return SentenceTransformer(model_name)
+# ─────────────────────────────────────────────────────────────────────────────
+# Embedding & Vector Database (GPU Accelerated)
+# ─────────────────────────────────────────────────────────────────────────────
+_cached_embedding_model: Optional[SentenceTransformer] = None
 
 
-def create_embedding_text(embedding_model: object, chunks: list, size: int = 64):
+def load_embedded_model(model_name: str = "BAAI/bge-base-en-v1.5", device: Optional[str] = None) -> SentenceTransformer:
+    global _cached_embedding_model
+    if _cached_embedding_model is not None:
+        return _cached_embedding_model
+
+    if device is None:
+        device = get_device()
+    logger.info(f"Loading embedding model '{model_name}' on device: {device}")
+    try:
+        # Prefer cached local weights to avoid unneeded network calls
+        _cached_embedding_model = SentenceTransformer(model_name, device=device, local_files_only=True)
+    except Exception:
+        _cached_embedding_model = SentenceTransformer(model_name, device=device)
+    return _cached_embedding_model
+
+
+def create_embedding_text(embedding_model: SentenceTransformer, chunks: list, size: int = 64):
     embedding_text = embedding_model.encode(
         chunks,
         batch_size=size,
@@ -159,21 +259,37 @@ def create_embedding_text(embedding_model: object, chunks: list, size: int = 64)
     return embedding_text, embedding_text.shape
 
 
-def initialize_vector_database(path: str = CHROMA_PATH):
+def initialize_vector_database(path: str = CHROMA_PATH) -> chromadb.PersistentClient:
     os.makedirs(path, exist_ok=True)
     return chromadb.PersistentClient(path=path)
 
 
-def initialize_collections(client: object, collection_name: str = COLLECTION_NAME):
+def initialize_collections(client: chromadb.PersistentClient, collection_name: str = COLLECTION_NAME):
     return client.create_collection(collection_name)
 
 
-def get_collection(client: object, collection_name: str = COLLECTION_NAME):
+def get_collection(client: chromadb.PersistentClient, collection_name: str = COLLECTION_NAME):
     return client.get_collection(collection_name)
 
 
-def query_builder(user_query: str, top_k: int = 15):
+def add_in_collection(collection, ids: list, chunks: list, embedded_text, metadatas: Optional[list] = None):
+    embeddings_list = embedded_text.tolist() if hasattr(embedded_text, "tolist") else embedded_text
+    kwargs = {
+        "ids": ids,
+        "documents": chunks,
+        "embeddings": embeddings_list,
+    }
+    if metadatas is not None:
+        kwargs["metadatas"] = metadatas
+    collection.add(**kwargs)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Retrieval & Prompt Construction
+# ─────────────────────────────────────────────────────────────────────────────
+def query_builder(user_query: str, top_k: int = 15) -> Tuple[str, list, list]:
     global embedding_model, collection
+
     if embedding_model is None:
         embedding_model = load_embedded_model()
 
@@ -182,38 +298,57 @@ def query_builder(user_query: str, top_k: int = 15):
         try:
             collection = client.get_collection(COLLECTION_NAME)
         except Exception:
-            raise RuntimeError("No collection found. Please upload and index PDFs first.")
+            pass
 
-    context = ""
-    sources = []
-    query_embedding = embedding_model.encode(
-        user_query,
-        normalize_embeddings=True
-    )
+    if collection is None:
+        raise RuntimeError("No indexed documents found in vector store. Please index PDFs first.")
 
     total_in_db = collection.count()
     actual_top_k = min(top_k, total_in_db) if total_in_db > 0 else top_k
 
+    print(f"[Retrieval] Vector DB contains {total_in_db} total indexed chunks. Searching for top {actual_top_k} most relevant...")
+
+    query_embedding = embedding_model.encode(
+        user_query,
+        normalize_embeddings=True,
+        show_progress_bar=False
+    )
+
     result = collection.query(
         query_embeddings=query_embedding.tolist(),
         n_results=actual_top_k,
+        include=["documents", "metadatas"]
     )
-    
-    ids = result['ids'][0]
-    chunks = result['documents'][0]
-    num_of_chunks_retrieved = len(ids)
-    
-    for i in range(num_of_chunks_retrieved):
-        source = ids[i].split(".pdf")[0]
-        if source not in sources:
-            sources.append(source)
+
+    ids = result["ids"][0]
+    chunks = result["documents"][0]
+    metas = result["metadatas"][0] if result.get("metadatas") and result["metadatas"] else []
+
+    sources = []
+    context = ""
+
+    for i in range(len(ids)):
+        meta = metas[i] if i < len(metas) and metas[i] else {}
+        paper_title = meta.get("paper_title")
+        if not paper_title:
+            paper_title = ids[i].split(".pdf")[0].replace("_", " ")
+
+        section_path = meta.get("section_path") or meta.get("section", "Section")
+        chunk_type = meta.get("chunk_type", "body")
+        label = meta.get("label", "")
+
+        if paper_title not in sources:
+            sources.append(paper_title)
+
+        type_header = f" [{label}]" if label else (f" [{chunk_type}]" if chunk_type in ("table", "code", "figure_caption") else "")
 
         context += f"""
-Paper   : {source}
-Section : {chunks[i]}
+Paper   : {paper_title}
+Section : {section_path}{type_header}
+Content : {chunks[i]}
 
 -------"""
-    
+
     prompt = f"""
 You are an expert research assistance helping researchers and students. 
 You job is to give precise and clean answer user question clearly and accurately using only the context provided.
@@ -231,9 +366,12 @@ Context:
     return prompt, sources, ids
 
 
-def answer_generator(prompt: str):
+# ─────────────────────────────────────────────────────────────────────────────
+# Answer Generation (OpenRouter API)
+# ─────────────────────────────────────────────────────────────────────────────
+def answer_generator(prompt: str) -> dict:
     load_dotenv()
-    api_key = os.getenv('OPEN_ROUTER_API_KEY') or os.getenv('OPENROUTER_API_KEY')
+    api_key = os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     llm_model = os.getenv("RAG_LLM_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
 
     client = OpenAI(
