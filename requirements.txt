@@ -1,9 +1,8 @@
 streamlit
-chromadb
-pymupdf4llm
 sentence-transformers
+chromadb
+openai
 requests
 python-dotenv
-openai
 loguru
 pydantic
