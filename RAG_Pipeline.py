@@ -114,10 +114,36 @@ def parse_document(file_path: str, parser: Optional[MinerUParser] = None) -> Tup
             parser = None
 
     if parser is not None:
-        doc = parser.parse(file_path)
-        blocks = blocks_from_structured(doc.structured_content())
-        title, sections, extras = extract_paper(blocks, fallback_title=fallback_title)
-    else:
+        try:
+            doc = parser.parse(file_path)
+            blocks = blocks_from_structured(doc.structured_content())
+            title, sections, extras = extract_paper(blocks, fallback_title=fallback_title)
+        except Exception as e:
+            # 2026-11-16: on the user's laptop, MinerU basic-tier parsing fails
+            # for most papers AFTER the models run, with
+            # "argument 'private_ranges': 'int' object is not an instance of 'tuple'"
+            # (29 of 31 thesis papers in the benchmark run; the models themselves
+            # complete fine, the failure is in post-processing). Dropping the paper
+            # entirely is the worst outcome, so fall back in order:
+            #   1. flash tier — pure text extraction, no model pipeline, so it
+            #      dodges the broken post-processing step;
+            #   2. PyMuPDF4LLM — the existing fallback below.
+            # The fallback result is cached exactly like a normal parse, so a
+            # re-run is fast. Which tier succeeded is logged for every paper.
+            logger.warning(f"MinerU basic parse failed for {file_name}: {e}. Trying flash tier...")
+            try:
+                if MinerUParser is None:
+                    raise RuntimeError("MinerUParser not available for flash fallback")
+                flash_parser = MinerUParser(tier="flash", parse_mode="auto", image_analysis=False)
+                doc = flash_parser.parse(file_path)
+                blocks = blocks_from_structured(doc.structured_content())
+                title, sections, extras = extract_paper(blocks, fallback_title=fallback_title)
+                logger.warning(f"Flash-tier parse succeeded for {file_name} (basic tier failed).")
+            except Exception as e2:
+                logger.warning(f"Flash parse failed for {file_name}: {e2}. Trying PyMuPDF4LLM fallback...")
+                parser = None
+
+    if parser is None:
         # Fallback parser using pymupdf4llm / pypdf
         try:
             import pymupdf4llm

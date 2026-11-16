@@ -7,7 +7,12 @@
 streamlit>=1.40,<2
 chromadb>=0.5,<2
 mineru==4.0.12
+docvortex==0.5.16
 sentence-transformers>=3.0,<7
 openai>=1.0,<4
 pymupdf4llm>=0.0.20,<2
 python-dotenv>=1.0,<2
+langchain>=1.5,<2
+langchain-chroma>=1.1,<2
+langchain-huggingface>=1.2,<2
+langchain-openai>=1.8,<2

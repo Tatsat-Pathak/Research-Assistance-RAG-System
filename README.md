@@ -9,32 +9,71 @@
 
 A robust, from-scratch **Retrieval-Augmented Generation (RAG)** assistant engineered specifically for academic researchers and students. This application allows users to upload PDF research papers and ask nuanced, high-level or fine-grained questions, receiving synthesized, context-aware answers complete with **direct section citations** and **deep reasoning traces**.
 
-Instead of relying on rigid high-level abstractions like LangChain or LlamaIndex, the entire RAG pipeline is built **from scratch** to give full programmatic control over layout parsing, academic boundary trimming, structure-aware semantic chunking, and vector retrieval.
+The core RAG pipeline is built **from scratch** (no LangChain, no LlamaIndex) to give full programmatic control over layout parsing, academic boundary trimming, structure-aware semantic chunking, and vector retrieval. A LangChain implementation of the same pipeline (`langchain_rag.py`) lives alongside it — same parsing, chunking, embeddings and index, only the retrieval + answer wiring is LangChain — and the two are benchmarked head-to-head below.
 
 > **No hosted live demo** — run it locally (see Getting Started below).
 
 ## 🏆 Benchmark & Retrieval Evaluation
 
-The RAG retrieval engine was systematically evaluated and benchmarked across **45 specialized research papers** comprising **2,084 vector chunks** across 6 core vector search themes:
-1. **Foundations Papers** (HNSW, NSW, Product Quantization, FAISS, CAGRA)
-2. **GPU Papers** (CAGRA, GGNN, SONG, GPU-accelerated OPQ)
-3. **Core Papers** (Variance-Aware Quantization, Search Quality Trade-offs, AQR-HNSW)
-4. **Auto-Tuning Papers** (Constrained Optimization, HNSW Hyperparameter Tuning)
-5. **Resource Constraint** (DiskANN Single-Node, Raspberry Pi & Edge ANN)
-6. **Server-Grade Benchmarking** (High-Dimensional ANN, KScaNN, Unified Vector DB Benchmarks)
+The RAG retrieval engine was systematically evaluated on **35 unique research papers** (37 files — DiskANN and OPQ each appear in two theme folders) comprising **1,611 vector chunks** across 6 themes:
+1. **Foundations Papers** (12) — HNSW, NSW, Product Quantization, FAISS, CAGRA, ANN-Benchmarks
+2. **GPU Papers** (5) — CAGRA, GGNN, SONG, GPU-accelerated graph search, OPQ
+3. **Core Papers** (8) — ScaNN, IVF-RaBitQ, InSituANN, Inverted Multi-Index, Polysemous Codes, VAQ, AQR-HNSW
+4. **Auto-Tuning Papers** (3) — Constrained Optimization, HNSW Hyperparameter Tuning, Cluster-Shaped Indices
+5. **Resource Constraint** (3) — DiskANN Single-Node, Raspberry Pi & Edge ANN
+6. **Server-Grade Benchmarking** (4) — Vector DB evaluation, KScaNN, Unified Vector DB Benchmarks
 
 ### Verified Retrieval Performance Metrics
 
-| Metric | Score | Context / Standard |
-| :--- | :---: | :--- |
-| **Top-1 Retrieval Accuracy** | **83.33%** | 5 out of 6 domain research questions hit the exact ground-truth paper at Rank #1 |
-| **Top-3 Retrieval Accuracy** | **83.33%** | High precision maintained at low context thresholds |
-| **Top-5 Retrieval Accuracy** | **100.00%** | 100% of domain queries found their target paper within the top 5 results |
-| **Mean Reciprocal Rank (MRR)** | **0.8750** | Average rank placement of first relevant match is ~1.14 |
-| **Average Search Latency** | **30.25 ms** | Real-time cosine similarity search across 2,084 768-d embeddings |
-| **Disk Cache Ingestion Speed** | **< 1.00 ms** | SHA-256 disk hashing eliminates redundant parsing |
+12 thematic questions, strict scoring (a chunk counts as a hit only if its text contains at least 2 of the question's expected keywords **and** its theme matches the question's theme or its section is a specific expected section). Both versions were tested on the **same** Chroma collection — same chunks, same embeddings, same queries, same Top-K — so any difference in the numbers is the wiring, not the data.
 
-> Note: these figures are from the author's local evaluation. The evaluation script and data are not in this repo, so the numbers can't be reproduced from here alone.
+| Metric | Original (from scratch) | LangChain version |
+| :--- | :---: | :---: |
+| **Top-1 Retrieval Accuracy** | **66.67%** (8/12) | **66.67%** (8/12) |
+| **Top-3 Retrieval Accuracy** | **100.00%** (12/12) | **100.00%** (12/12) |
+| **Top-5 Retrieval Accuracy** | **100.00%** (12/12) | **100.00%** (12/12) |
+| **Mean Reciprocal Rank (MRR)** | **0.8194** | **0.8194** |
+| **Per-paper coverage** | **100.00%** (12/12) | **100.00%** (12/12) |
+| **Average Search Latency (global)** | **~30 ms** | **~29 ms** |
+| **Average Search Latency (per-paper set)** | **~256 ms** | **~1,746 ms** |
+| **Disk Cache Ingestion Speed** | **< 1.00 ms** | **< 1.00 ms** |
+
+- **Top-1/3/5 and MRR** come from one similarity search across all papers (global ranking). The right paper is first for 8 of 12 questions and in the top 3 for all 12.
+- **Per-paper coverage** is what the app actually needs: the fraction of questions where the per-paper set sent to the LLM contains at least one qualifying chunk. It is 12/12 — every question is answerable from the context the app builds.
+- The two versions are **identical on every retrieval metric**. LangChain adds nothing to retrieval quality; the original is ~7x faster on the per-paper path.
+
+> These figures are from the author's local evaluation on the 35-paper collection above. The evaluation is reproducible from this repo: the scripts are `evaluate_literature_review.py` (full benchmark) and `benchmark_retrieval.py` (retrieval-only, ~40 s on the existing index) — see [Reproduce the benchmark](#reproduce-the-benchmark). The numbers above are retrieval-only; the optional LLM end-to-end step was not run for this table.
+
+### Reproduce the benchmark
+
+```bash
+# Retrieval only, on the existing index (no re-parsing, ~40 s)
+python benchmark_retrieval.py
+
+# Full benchmark: parses/indexes only papers not already in the
+# collection, then measures retrieval (add --no-llm to skip the LLM step)
+python evaluate_literature_review.py --no-llm
+
+# Measure the existing index without touching it
+python evaluate_literature_review.py --reuse-index --no-llm
+```
+
+The benchmark reads the papers from `Literature Review/` (theme subfolders) and `documents/`, and uses the `literature_review_chroma_db` collection inside `upload_pdfs_chroma_db/`. Results are written to `literature_review_benchmark_results.json` (latest run kept in this repo).
+
+---
+
+## 🔀 LangChain Version
+
+`langchain_rag.py` is the same pipeline with LangChain wiring. It reuses the production MinerU parsing, section-aware chunking (~300 words), `bge-base-en-v1.5` embeddings, and the **same** Chroma collection — only retrieval and LLM wiring are LangChain (`langchain-chroma` `Chroma`, `HuggingFaceEmbeddings`, `ChatOpenAI` via OpenRouter, LCEL chain). There is no LangGraph; the chain is a straight line.
+
+The per-paper retrieval behaviour is preserved deliberately (a global Top-K is the bug that used to drop papers): the Top-K budget is split evenly across papers, each paper's Abstract is always included, and the prompt instructs the LLM to cover **every** paper.
+
+```bash
+# Ask a question through the LangChain version (needs .env with OPENROUTER_API_KEY)
+python langchain_rag.py --ask "what does each paper talk about?" --top-k 15
+```
+
+LangChain dependencies are in `requirements.txt` (`langchain>=1.5`, `langchain-chroma>=1.1`, `langchain-huggingface>=1.2`, `langchain-openai>=1.8`). In the benchmark above, its retrieval is identical to the from-scratch version on all 12 questions.
 
 ---
 
@@ -76,6 +115,8 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 - **Structure-Aware Semantic Chunking:** Chunks respect paragraph and section boundaries, preventing semantic fragmentation.
 - **Instant Ingestion with Caching:** SHA-256 disk cache prevents redundant parsing on repeated files (<1ms reload).
 - **Executive Dark UI:** Custom glassmorphism CSS theme built with Inter typography, animated response bubbles, and clean status indicators.
+- **LangChain Version Included:** `langchain_rag.py` offers the same pipeline with LangChain retrieval + answer wiring, benchmarked head-to-head against the from-scratch version (identical retrieval, see above).
+- **Benchmarked Retrieval:** The retrieval engine is evaluated on 35 papers / 12 questions with strict scoring; the scripts and latest results are in the repo.
 
 ---
 
@@ -88,6 +129,7 @@ The pipeline consists of two synchronized, decoupled workflows: **Indexing Flow*
 | **Embedding Model** | `BAAI/bge-base-en-v1.5` | 768-dimensional normalized dense semantic representations |
 | **Vector Database** | [ChromaDB](https://www.trychroma.com/) | Persistent local vector client with cosine distance indexing |
 | **LLM Backend** | OpenRouter API | Reasoning model (`nvidia/nemotron-3.5-super-vl:free` by default; set `RAG_LLM_MODEL` to change it) |
+| **LangChain Version** | `langchain`, `langchain-chroma`, `langchain-huggingface`, `langchain-openai` | Alternative retrieval + answer wiring over the same parsing, chunking, embeddings and index |
 | **Environment** | Python 3.10+ | Core execution runtime |
 
 ---
@@ -120,21 +162,39 @@ streamlit run app.py
 ```
 Open your browser at `http://localhost:8501`, drop your PDF papers into the sidebar, click **⚡ Index Documents**, and ask your research questions!
 
+### 5. Try the LangChain Version
+```bash
+python langchain_rag.py --ask "what does each paper talk about?" --top-k 15
+```
+Needs `.env` with `OPENROUTER_API_KEY`. It answers from the same Chroma collection the app builds.
+
+### 6. Run the Benchmark
+```bash
+python benchmark_retrieval.py          # retrieval only, ~40 s on the existing index
+python evaluate_literature_review.py --no-llm   # full benchmark (incremental index + retrieval)
+```
+See [Reproduce the benchmark](#reproduce-the-benchmark).
+
 ---
 
 ## 📂 Repository Structure
 
 ```
 Research-Assistance-RAG-System/
-├── app.py                     # Streamlit frontend with custom dark theme & reasoning UI
-├── RAG_Pipeline.py            # Core RAG logic: parsing, chunking, embedding & OpenRouter LLM
-├── extract_papers.py          # Section/table/equation extraction from MinerU structured output
-├── chunks_generated.py        # Structure-aware chunking (~300-word chunks, section paths)
-├── rag_architecture.png       # High-resolution system architecture diagram
-├── requirements.txt           # Pinned/bounded production dependencies
-├── LICENSE                    # MIT License
-├── .gitignore                 # Excludes caches, vector databases, and private PDFs
-└── README.md                  # Project documentation & benchmark evaluation results
+├── app.py                              # Streamlit frontend with custom dark theme & reasoning UI
+├── RAG_Pipeline.py                     # Core RAG logic: parsing, chunking, embedding & OpenRouter LLM
+├── extract_papers.py                   # Section/table/equation extraction from MinerU structured output
+├── chunks_generated.py                 # Structure-aware chunking (~300-word chunks, section paths)
+├── langchain_rag.py                    # LangChain version: same parsing/chunking/index, LangChain retrieval + answer wiring
+├── evaluate_literature_review.py       # Full benchmark: incremental index + retrieval + optional LLM end-to-end
+├── benchmark_retrieval.py              # Retrieval-only benchmark (global ranking + per-paper coverage) + scoring & queries
+├── test_evaluate_benchmark.py          # Tests for the benchmark (fake embeddings/LLM, no model or key needed)
+├── literature_review_benchmark_results.json  # Latest benchmark results
+├── rag_architecture.png                # High-resolution system architecture diagram
+├── requirements.txt                    # Pinned/bounded production dependencies
+├── LICENSE                             # MIT License
+├── .gitignore                          # Excludes caches, vector databases, and private PDFs
+└── README.md                           # Project documentation & benchmark evaluation results
 ```
 
 ### Hosting notes

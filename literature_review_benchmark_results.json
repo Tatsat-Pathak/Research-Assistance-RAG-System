@@ -1,0 +1,601 @@
+{
+  "versions": [
+    "original",
+    "langchain"
+  ],
+  "top_k": 10,
+  "collection": "literature_review_chroma_db",
+  "total_papers": 35,
+  "total_chunks": 1611,
+  "new_papers_indexed": 0,
+  "new_chunks_indexed": 0,
+  "total_runtime_sec": 25.88,
+  "papers": [
+    {
+      "title": "AUTOMATING NEAREST NEIGHBOR SEARCH CONFIG-URATION WITH CONSTRAINED OPTIMIZATION",
+      "theme": "Auto Tunning Papers",
+      "chunks": 37
+    },
+    {
+      "title": "Exploiting Structural Properties for Efficient Constraint-Aware HNSW Hyperparameter Tuning",
+      "theme": "Auto Tunning Papers",
+      "chunks": 65
+    },
+    {
+      "title": "Fast Adaptive Approximate Nearest Neighbor Search with Cluster-Shaped Indices",
+      "theme": "Auto Tunning Papers",
+      "chunks": 76
+    },
+    {
+      "title": "Analyzing and Reducing Search Quality Differences in Vector Similarity Search",
+      "theme": "Core Papers",
+      "chunks": 45
+    },
+    {
+      "title": "Fast Adaptive Similarity Search through Variance-Aware Quantization",
+      "theme": "Core Papers",
+      "chunks": 63
+    },
+    {
+      "title": "AQR-HNSW: Accelerating Approximate Nearest Neighbor Search via Density-aware !antization and Multi-stage Re-ranking",
+      "theme": "Core Papers",
+      "chunks": 34
+    },
+    {
+      "title": "Approximate nearest neighbor algorithm based on navigable small world graphs",
+      "theme": "Foundations Papers",
+      "chunks": 27
+    },
+    {
+      "title": "Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs",
+      "theme": "Foundations Papers",
+      "chunks": 44
+    },
+    {
+      "title": "Product Quantization for Nearest Neighbor Search",
+      "theme": "Foundations Papers",
+      "chunks": 55
+    },
+    {
+      "title": "DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node",
+      "theme": "Resource Constraint",
+      "chunks": 37
+    },
+    {
+      "title": "Billion-Scale Similarity Search with GPUs",
+      "theme": "Foundations Papers",
+      "chunks": 70
+    },
+    {
+      "title": "ANN-Benchmarks: A Benchmarking Tool for Approximate Nearest Neighbor Algorithms^\u2217",
+      "theme": "Foundations Papers",
+      "chunks": 44
+    },
+    {
+      "title": "CAGRA: Highly Parallel Graph Construction and Approximate Nearest Neighbor Search for GPUs",
+      "theme": "Foundations Papers",
+      "chunks": 45
+    },
+    {
+      "title": "Graph-Based Vector Search: An Experimental Evaluation of the State-of-the-Art",
+      "theme": "Foundations Papers",
+      "chunks": 66
+    },
+    {
+      "title": "A Multi-Objective Benchmark of FAISS Indexes for Lightweight On-Device Recommendation Retrieval",
+      "theme": "Foundations Papers",
+      "chunks": 19
+    },
+    {
+      "title": "A Survey of Vector Quantization for Approximate Nearest Neighbor Search",
+      "theme": "Foundations Papers",
+      "chunks": 66
+    },
+    {
+      "title": "RSLM: Training-Free Vector Quantization for Approximate Nearest Neighbor Search",
+      "theme": "Foundations Papers",
+      "chunks": 53
+    },
+    {
+      "title": "Locally Optimized Product Quantization for Approximate Nearest Neighbor Search",
+      "theme": "Foundations Papers",
+      "chunks": 46
+    },
+    {
+      "title": "Efficient K-Nearest Neighbor Graph Construction for Generic Similarity Measures",
+      "theme": "Foundations Papers",
+      "chunks": 48
+    },
+    {
+      "title": "An Experimental Study of GPU-Based Graph ANN Search Algorithms",
+      "theme": "GPU Papers",
+      "chunks": 25
+    },
+    {
+      "title": "GPU-accelerated Proximity Graph Approximate Nearest Neighbor Search and Construction",
+      "theme": "GPU Papers",
+      "chunks": 56
+    },
+    {
+      "title": "GGNN: Graph-Based GPU Nearest Neighbor Search",
+      "theme": "GPU Papers",
+      "chunks": 55
+    },
+    {
+      "title": "SONG: Approximate Nearest Neighbor Search on GPU",
+      "theme": "GPU Papers",
+      "chunks": 45
+    },
+    {
+      "title": "Optimized Product Quantization for Approximate Nearest Neighbor Search",
+      "theme": "GPU Papers",
+      "chunks": 34
+    },
+    {
+      "title": "Experimental comparison of graph-based approximate nearest neighbor search algorithms on edge devices",
+      "theme": "Resource Constraint",
+      "chunks": 24
+    },
+    {
+      "title": "Efficient Approximate Nearest Neighbor Search on a Raspberry Pi",
+      "theme": "Resource Constraint",
+      "chunks": 9
+    },
+    {
+      "title": "A Comprehensive Empirical Evaluation of Vector Database Systems for Approximate Nearest Neighbor Search: Performance, Quality, and Resource Trade-offs",
+      "theme": "Server Grade Benchmarking",
+      "chunks": 16
+    },
+    {
+      "title": "List of Abbreviations",
+      "theme": "Server Grade Benchmarking",
+      "chunks": 65
+    },
+    {
+      "title": "KScaNN: Scalable Approximate Nearest Neighbor Search on Kunpeng",
+      "theme": "Server Grade Benchmarking",
+      "chunks": 48
+    },
+    {
+      "title": "[A unified benchmarking framework for vector databases in scalable embedding-based image retrieval systems](https://www.frontiersin.org/articles/10.3389/fcomp.2026.1819991/full)",
+      "theme": "Server Grade Benchmarking",
+      "chunks": 93
+    },
+    {
+      "title": "The Inverted Multi-Index",
+      "theme": "Core Papers",
+      "chunks": 32
+    },
+    {
+      "title": "Accelerating Large-Scale Inference with Anisotropic Vector Quantization",
+      "theme": "Core Papers",
+      "chunks": 39
+    },
+    {
+      "title": "Polysemous codes",
+      "theme": "Core Papers",
+      "chunks": 32
+    },
+    {
+      "title": "GPU-Native Approximate Nearest Neighbor Search with IVF-RaBitQ: Fast Index Build and Search",
+      "theme": "Core Papers",
+      "chunks": 57
+    },
+    {
+      "title": "InSituANN: Revisiting IVF for PCIe-Efficient Billion-Scale Vector Search",
+      "theme": "Core Papers",
+      "chunks": 41
+    }
+  ],
+  "ir_metrics": {
+    "original": {
+      "global": {
+        "top1_acc_pct": 66.7,
+        "top3_acc_pct": 100.0,
+        "top5_acc_pct": 100.0,
+        "mrr": 0.8194,
+        "avg_retrieval_lat_ms": 30.46
+      },
+      "coverage": {
+        "coverage_pct": 100.0,
+        "avg_qualifying_chunks": 10.5,
+        "avg_retrieval_lat_ms": 255.65
+      },
+      "queries": [
+        {
+          "id": "Q1_HNSW_GRAPH",
+          "query": "How does Hierarchical Navigable Small World (HNSW) graph construction enable logarithmic search complexity for approximate nearest neighbors?",
+          "theme": "Foundations Papers",
+          "global_match_rank": 1,
+          "keywords_found": 5,
+          "covered": true,
+          "qualifying_chunks": 15,
+          "per_paper_chunks_returned": 103,
+          "global_latency_ms": 36.88,
+          "coverage_latency_ms": 267.32,
+          "retrieved_papers": [
+            "Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs",
+            "GPU-accelerated Proximity Graph Approximate Nearest Neighbor Search and Construction"
+          ]
+        },
+        {
+          "id": "Q2_GPU_CAGRA",
+          "query": "How does CAGRA achieve highly parallel graph construction and approximate nearest neighbor search on GPUs?",
+          "theme": "GPU Papers",
+          "global_match_rank": 1,
+          "keywords_found": 5,
+          "covered": true,
+          "qualifying_chunks": 16,
+          "per_paper_chunks_returned": 103,
+          "global_latency_ms": 29.03,
+          "coverage_latency_ms": 264.93,
+          "retrieved_papers": [
+            "CAGRA: Highly Parallel Graph Construction and Approximate Nearest Neighbor Search for GPUs"
+          ]
+        },
+        {
+          "id": "Q3_QUANTIZATION_PQ",
+          "query": "What is the difference between Product Quantization (PQ), OPQ, and Variance-Aware Quantization in vector similarity search?",
+          "theme": "Core Papers",
+          "global_match_rank": 1,
+          "keywords_found": 2,
+          "covered": true,
+          "qualifying_chunks": 22,
+          "per_paper_chunks_returned": 105,
+          "global_latency_ms": 32.21,
+          "coverage_latency_ms": 272.15,
+          "retrieved_papers": [
+            "Fast Adaptive Similarity Search through Variance-Aware Quantization"
+          ]
+        },
+        {
+          "id": "Q4_AUTO_TUNING",
+          "query": "How can hyperparameter tuning for HNSW and nearest neighbor search be automated using constrained optimization?",
+          "theme": "Auto Tunning Papers",
+          "global_match_rank": 1,
+          "keywords_found": 4,
+          "covered": true,
+          "qualifying_chunks": 5,
+          "per_paper_chunks_returned": 100,
+          "global_latency_ms": 28.25,
+          "coverage_latency_ms": 227.89,
+          "retrieved_papers": [
+            "Exploiting Structural Properties for Efficient Constraint-Aware HNSW Hyperparameter Tuning"
+          ]
+        },
+        {
+          "id": "Q5_DISKANN_EDGE",
+          "query": "How does DiskANN achieve billion-scale nearest neighbor search on a single node or resource-constrained edge device?",
+          "theme": "Resource Constraint",
+          "global_match_rank": 1,
+          "keywords_found": 4,
+          "covered": true,
+          "qualifying_chunks": 4,
+          "per_paper_chunks_returned": 99,
+          "global_latency_ms": 28.01,
+          "coverage_latency_ms": 246.28,
+          "retrieved_papers": [
+            "DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node"
+          ]
+        },
+        {
+          "id": "Q6_SERVER_BENCHMARK",
+          "query": "What metrics and benchmarking frameworks are used to evaluate vector databases in server-grade high-dimensional similarity search?",
+          "theme": "Server Grade Benchmarking",
+          "global_match_rank": 1,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 13,
+          "per_paper_chunks_returned": 100,
+          "global_latency_ms": 28.98,
+          "coverage_latency_ms": 248.21,
+          "retrieved_papers": [
+            "A Comprehensive Empirical Evaluation of Vector Database Systems for Approximate Nearest Neighbor Search: Performance, Quality, and Resource Trade-offs"
+          ]
+        },
+        {
+          "id": "Q7_IVF_PQ",
+          "query": "How does IVF-PQ combine an inverted file index with product quantization to search large vector collections?",
+          "theme": "Core Papers",
+          "global_match_rank": 1,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 19,
+          "per_paper_chunks_returned": 104,
+          "global_latency_ms": 30.35,
+          "coverage_latency_ms": 271.92,
+          "retrieved_papers": [
+            "InSituANN: Revisiting IVF for PCIe-Efficient Billion-Scale Vector Search",
+            "Fast Adaptive Approximate Nearest Neighbor Search with Cluster-Shaped Indices",
+            "KScaNN: Scalable Approximate Nearest Neighbor Search on Kunpeng",
+            "A Survey of Vector Quantization for Approximate Nearest Neighbor Search"
+          ]
+        },
+        {
+          "id": "Q8_SCANN",
+          "query": "How does ScaNN use anisotropic vector quantization and asymmetric hashing for fast maximum inner product search?",
+          "theme": "Core Papers",
+          "global_match_rank": 2,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 2,
+          "per_paper_chunks_returned": 102,
+          "global_latency_ms": 31.16,
+          "coverage_latency_ms": 254.31,
+          "retrieved_papers": [
+            "A Survey of Vector Quantization for Approximate Nearest Neighbor Search",
+            "Accelerating Large-Scale Inference with Anisotropic Vector Quantization",
+            "RSLM: Training-Free Vector Quantization for Approximate Nearest Neighbor Search"
+          ]
+        },
+        {
+          "id": "Q9_RABITQ",
+          "query": "What is RaBitQ and how does it quantize vectors for fast approximate nearest neighbor search?",
+          "theme": "Core Papers",
+          "global_match_rank": 2,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 3,
+          "per_paper_chunks_returned": 101,
+          "global_latency_ms": 29.02,
+          "coverage_latency_ms": 259.54,
+          "retrieved_papers": [
+            "A Survey of Vector Quantization for Approximate Nearest Neighbor Search",
+            "GPU-Native Approximate Nearest Neighbor Search with IVF-RaBitQ: Fast Index Build and Search"
+          ]
+        },
+        {
+          "id": "Q10_OPQ",
+          "query": "How does Optimized Product Quantization (OPQ) improve on Product Quantization by learning a rotation of the space?",
+          "theme": "Core Papers",
+          "global_match_rank": 2,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 2,
+          "per_paper_chunks_returned": 104,
+          "global_latency_ms": 29.12,
+          "coverage_latency_ms": 251.79,
+          "retrieved_papers": [
+            "Locally Optimized Product Quantization for Approximate Nearest Neighbor Search",
+            "Optimized Product Quantization for Approximate Nearest Neighbor Search"
+          ]
+        },
+        {
+          "id": "Q11_ANN_BENCH",
+          "query": "How are approximate nearest neighbor algorithms benchmarked, and which metrics (recall, QPS, latency) are used to compare them?",
+          "theme": "Server Grade Benchmarking",
+          "global_match_rank": 3,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 11,
+          "per_paper_chunks_returned": 102,
+          "global_latency_ms": 33.73,
+          "coverage_latency_ms": 259.29,
+          "retrieved_papers": [
+            "ANN-Benchmarks: A Benchmarking Tool for Approximate Nearest Neighbor Algorithms^\u2217"
+          ]
+        },
+        {
+          "id": "Q12_QUANT_SURVEY",
+          "query": "What are the main vector quantization methods for approximate nearest neighbor search and how do they compare?",
+          "theme": "Foundations Papers",
+          "global_match_rank": 1,
+          "keywords_found": 2,
+          "covered": true,
+          "qualifying_chunks": 14,
+          "per_paper_chunks_returned": 99,
+          "global_latency_ms": 28.73,
+          "coverage_latency_ms": 244.13,
+          "retrieved_papers": [
+            "A Survey of Vector Quantization for Approximate Nearest Neighbor Search"
+          ]
+        }
+      ]
+    },
+    "langchain": {
+      "global": {
+        "top1_acc_pct": 66.7,
+        "top3_acc_pct": 100.0,
+        "top5_acc_pct": 100.0,
+        "mrr": 0.8194,
+        "avg_retrieval_lat_ms": 28.88
+      },
+      "coverage": {
+        "coverage_pct": 100.0,
+        "avg_qualifying_chunks": 10.5,
+        "avg_retrieval_lat_ms": 1745.67
+      },
+      "queries": [
+        {
+          "id": "Q1_HNSW_GRAPH",
+          "query": "How does Hierarchical Navigable Small World (HNSW) graph construction enable logarithmic search complexity for approximate nearest neighbors?",
+          "theme": "Foundations Papers",
+          "global_match_rank": 1,
+          "keywords_found": 5,
+          "covered": true,
+          "qualifying_chunks": 15,
+          "per_paper_chunks_returned": 103,
+          "global_latency_ms": 31.76,
+          "coverage_latency_ms": 1793.05,
+          "retrieved_papers": [
+            "Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs",
+            "GPU-accelerated Proximity Graph Approximate Nearest Neighbor Search and Construction"
+          ]
+        },
+        {
+          "id": "Q2_GPU_CAGRA",
+          "query": "How does CAGRA achieve highly parallel graph construction and approximate nearest neighbor search on GPUs?",
+          "theme": "GPU Papers",
+          "global_match_rank": 1,
+          "keywords_found": 5,
+          "covered": true,
+          "qualifying_chunks": 16,
+          "per_paper_chunks_returned": 103,
+          "global_latency_ms": 27.86,
+          "coverage_latency_ms": 1740.81,
+          "retrieved_papers": [
+            "CAGRA: Highly Parallel Graph Construction and Approximate Nearest Neighbor Search for GPUs"
+          ]
+        },
+        {
+          "id": "Q3_QUANTIZATION_PQ",
+          "query": "What is the difference between Product Quantization (PQ), OPQ, and Variance-Aware Quantization in vector similarity search?",
+          "theme": "Core Papers",
+          "global_match_rank": 1,
+          "keywords_found": 2,
+          "covered": true,
+          "qualifying_chunks": 22,
+          "per_paper_chunks_returned": 105,
+          "global_latency_ms": 29.42,
+          "coverage_latency_ms": 1869.46,
+          "retrieved_papers": [
+            "Fast Adaptive Similarity Search through Variance-Aware Quantization"
+          ]
+        },
+        {
+          "id": "Q4_AUTO_TUNING",
+          "query": "How can hyperparameter tuning for HNSW and nearest neighbor search be automated using constrained optimization?",
+          "theme": "Auto Tunning Papers",
+          "global_match_rank": 1,
+          "keywords_found": 4,
+          "covered": true,
+          "qualifying_chunks": 5,
+          "per_paper_chunks_returned": 100,
+          "global_latency_ms": 26.95,
+          "coverage_latency_ms": 1636.66,
+          "retrieved_papers": [
+            "Exploiting Structural Properties for Efficient Constraint-Aware HNSW Hyperparameter Tuning"
+          ]
+        },
+        {
+          "id": "Q5_DISKANN_EDGE",
+          "query": "How does DiskANN achieve billion-scale nearest neighbor search on a single node or resource-constrained edge device?",
+          "theme": "Resource Constraint",
+          "global_match_rank": 1,
+          "keywords_found": 4,
+          "covered": true,
+          "qualifying_chunks": 4,
+          "per_paper_chunks_returned": 99,
+          "global_latency_ms": 29.32,
+          "coverage_latency_ms": 1677.07,
+          "retrieved_papers": [
+            "DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node"
+          ]
+        },
+        {
+          "id": "Q6_SERVER_BENCHMARK",
+          "query": "What metrics and benchmarking frameworks are used to evaluate vector databases in server-grade high-dimensional similarity search?",
+          "theme": "Server Grade Benchmarking",
+          "global_match_rank": 1,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 13,
+          "per_paper_chunks_returned": 100,
+          "global_latency_ms": 27.84,
+          "coverage_latency_ms": 1726.99,
+          "retrieved_papers": [
+            "A Comprehensive Empirical Evaluation of Vector Database Systems for Approximate Nearest Neighbor Search: Performance, Quality, and Resource Trade-offs"
+          ]
+        },
+        {
+          "id": "Q7_IVF_PQ",
+          "query": "How does IVF-PQ combine an inverted file index with product quantization to search large vector collections?",
+          "theme": "Core Papers",
+          "global_match_rank": 1,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 19,
+          "per_paper_chunks_returned": 104,
+          "global_latency_ms": 29.91,
+          "coverage_latency_ms": 1791.48,
+          "retrieved_papers": [
+            "InSituANN: Revisiting IVF for PCIe-Efficient Billion-Scale Vector Search",
+            "Fast Adaptive Approximate Nearest Neighbor Search with Cluster-Shaped Indices",
+            "KScaNN: Scalable Approximate Nearest Neighbor Search on Kunpeng",
+            "A Survey of Vector Quantization for Approximate Nearest Neighbor Search"
+          ]
+        },
+        {
+          "id": "Q8_SCANN",
+          "query": "How does ScaNN use anisotropic vector quantization and asymmetric hashing for fast maximum inner product search?",
+          "theme": "Core Papers",
+          "global_match_rank": 2,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 2,
+          "per_paper_chunks_returned": 102,
+          "global_latency_ms": 28.37,
+          "coverage_latency_ms": 1764.39,
+          "retrieved_papers": [
+            "A Survey of Vector Quantization for Approximate Nearest Neighbor Search",
+            "Accelerating Large-Scale Inference with Anisotropic Vector Quantization",
+            "RSLM: Training-Free Vector Quantization for Approximate Nearest Neighbor Search"
+          ]
+        },
+        {
+          "id": "Q9_RABITQ",
+          "query": "What is RaBitQ and how does it quantize vectors for fast approximate nearest neighbor search?",
+          "theme": "Core Papers",
+          "global_match_rank": 2,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 3,
+          "per_paper_chunks_returned": 101,
+          "global_latency_ms": 29.63,
+          "coverage_latency_ms": 1710.4,
+          "retrieved_papers": [
+            "A Survey of Vector Quantization for Approximate Nearest Neighbor Search",
+            "GPU-Native Approximate Nearest Neighbor Search with IVF-RaBitQ: Fast Index Build and Search"
+          ]
+        },
+        {
+          "id": "Q10_OPQ",
+          "query": "How does Optimized Product Quantization (OPQ) improve on Product Quantization by learning a rotation of the space?",
+          "theme": "Core Papers",
+          "global_match_rank": 2,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 2,
+          "per_paper_chunks_returned": 104,
+          "global_latency_ms": 27.83,
+          "coverage_latency_ms": 1776.92,
+          "retrieved_papers": [
+            "Locally Optimized Product Quantization for Approximate Nearest Neighbor Search",
+            "Optimized Product Quantization for Approximate Nearest Neighbor Search"
+          ]
+        },
+        {
+          "id": "Q11_ANN_BENCH",
+          "query": "How are approximate nearest neighbor algorithms benchmarked, and which metrics (recall, QPS, latency) are used to compare them?",
+          "theme": "Server Grade Benchmarking",
+          "global_match_rank": 3,
+          "keywords_found": 3,
+          "covered": true,
+          "qualifying_chunks": 11,
+          "per_paper_chunks_returned": 102,
+          "global_latency_ms": 31.65,
+          "coverage_latency_ms": 1806.34,
+          "retrieved_papers": [
+            "ANN-Benchmarks: A Benchmarking Tool for Approximate Nearest Neighbor Algorithms^\u2217"
+          ]
+        },
+        {
+          "id": "Q12_QUANT_SURVEY",
+          "query": "What are the main vector quantization methods for approximate nearest neighbor search and how do they compare?",
+          "theme": "Foundations Papers",
+          "global_match_rank": 1,
+          "keywords_found": 2,
+          "covered": true,
+          "qualifying_chunks": 14,
+          "per_paper_chunks_returned": 99,
+          "global_latency_ms": 26.07,
+          "coverage_latency_ms": 1654.53,
+          "retrieved_papers": [
+            "A Survey of Vector Quantization for Approximate Nearest Neighbor Search"
+          ]
+        }
+      ]
+    }
+  },
+  "llm_metrics": {}
+}
