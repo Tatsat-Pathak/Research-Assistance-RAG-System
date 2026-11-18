@@ -42,7 +42,20 @@ The RAG retrieval engine was systematically evaluated on **35 unique research pa
 - **Per-paper coverage** is what the app actually needs: the fraction of questions where the per-paper set sent to the LLM contains at least one qualifying chunk. It is 12/12 — every question is answerable from the context the app builds.
 - The two versions are **identical on every retrieval metric**. LangChain adds nothing to retrieval quality; the original is ~7x faster on the per-paper path.
 
-> These figures are from the author's local evaluation on the 35-paper collection above. The evaluation is reproducible from this repo: the scripts are `evaluate_literature_review.py` (full benchmark) and `benchmark_retrieval.py` (retrieval-only, ~40 s on the existing index) — see [Reproduce the benchmark](#reproduce-the-benchmark). The numbers above are retrieval-only; the optional LLM end-to-end step was not run for this table.
+### LLM Answer Evaluation (Faithfulness)
+
+The same 12 questions were also run end-to-end through each version's full answer path (OpenRouter LLM), and an independent LLM judge — a different model from the one that wrote the answers — scored whether every claim in each answer is supported by the retrieved chunks. The judge was Baidu ERNIE-5.5-Flash-Preview (`baidu/ernie-5.5-flash-preview:free`); it judged all 12 questions for both versions, with no errors.
+
+| Metric | Original (from scratch) | LangChain version |
+| :--- | :---: | :---: |
+| **Faithfulness (average)** | **99.4%** | **98.8%** |
+| **Answers fully faithful (100%)** | **8 of 12** | **9 of 12** |
+
+- **Faithfulness** is the share of claims in the answer that the retrieved context supports. The original version scored 100% on 8 of 12 questions (lowest 97.5% on Q12, quantization survey); the LangChain version scored 100% on 9 of 12 (lowest 88.5% on Q12, where it credited RaBitQ with RSLM's compression numbers). Both versions' answers are essentially fully grounded in the papers — neither version hallucinates materially.
+- These numbers replace the earlier run, in which the same model that wrote the answers also judged them (99.5% / 99.8%). The independent judge is slightly stricter, especially on the LangChain version.
+- The LLM step is non-deterministic (wording changes every run), so treat faithfulness as a spot-check of answer quality, not a stable benchmark like the retrieval numbers above.
+
+> These figures are from the author's local evaluation on the 35-paper collection above. The evaluation is reproducible from this repo: the scripts are `evaluate_literature_review.py` (full benchmark) and `benchmark_retrieval.py` (retrieval-only, ~40 s on the existing index) — see [Reproduce the benchmark](#reproduce-the-benchmark). The retrieval numbers above are retrieval-only. The faithfulness numbers come from the optional LLM end-to-end step (same script, without `--no-llm`), which runs the 12 questions through each version's full answer path and judges the answers against the retrieved context.
 
 ### Reproduce the benchmark
 
@@ -56,6 +69,10 @@ python evaluate_literature_review.py --no-llm
 
 # Measure the existing index without touching it
 python evaluate_literature_review.py --reuse-index --no-llm
+
+# Full LLM run on the existing index, with an independent judge
+# (a different model than the one that wrote the answers)
+python evaluate_literature_review.py --reuse-index --judge-model baidu/ernie-5.5-flash-preview:free
 ```
 
 The benchmark reads the papers from `Literature Review/` (theme subfolders) and `documents/`, and uses the `literature_review_chroma_db` collection inside `upload_pdfs_chroma_db/`. Results are written to `literature_review_benchmark_results.json` (latest run kept in this repo).

@@ -25,7 +25,13 @@ Workflow (v3 — incremental):
   5. End-to-end check for both versions (unless --no-llm): the same
      questions go through each version's full answer path (OpenRouter
      LLM, same model), and the answers are compared on keyword coverage,
-     sources returned, and latency.
+     sources returned, latency, and faithfulness — a second, short LLM
+     call (the "judge") checks whether every claim in the answer is
+     supported by the retrieved chunks, and scores it 0-100. A high
+     faithfulness score means the answer sticks to the papers; a low
+     one means the LLM added things that are not in the context.
+     (--no-faithfulness skips the judge and keeps the old three
+     numbers only.)
 
 Three modes:
   * default (incremental): parse only uncached papers, index only
@@ -62,14 +68,23 @@ Notes:
     models and can use ~4x the RAM. Use --workers 2 at most.
   * LLM answers are non-deterministic: run the end-to-end check twice
     and the wording will differ. Treat the LLM numbers as a spot-check
-    (did it cover the papers? did it use the right keywords?), and the
-    retrieval numbers (Top-1/3/5, MRR, coverage) as the stable comparison.
+    (did it cover the papers? did it use the right keywords? did it
+    stay faithful to the context?), and the retrieval numbers
+    (Top-1/3/5, MRR, coverage) as the stable comparison. The
+    faithfulness judge is itself an LLM call, so its score can wobble
+    a few points between runs — a big gap (e.g. 95 vs 60) matters,
+    a 2-point gap does not.
   * The OpenRouter key comes from a local .env file, same as app.py.
     Without it, the LLM step is skipped and retrieval still runs.
 
 Run (on your laptop, in the repo folder, venv active):
   python evaluate_literature_review.py --no-llm            # incremental: add new papers, retrieval only
-  python evaluate_literature_review.py                    # incremental + LLM end-to-end step
+  python evaluate_literature_review.py                    # incremental + LLM end-to-end step (with faithfulness judge)
+  python evaluate_literature_review.py --no-faithfulness  # LLM step, but skip the judge (fewer LLM calls)
+  python evaluate_literature_review.py --reuse-index --judge-model baidu/ernie-5.5-flash-preview:free
+                                                       # judge with a DIFFERENT model than the
+                                                       # answerer, so the faithfulness score is
+                                                       # independent (default: judge = answer model)
   python evaluate_literature_review.py --reuse-index --no-llm   # measure the existing index only
   python evaluate_literature_review.py --rebuild-index --no-llm # wipe and re-index everything
   python evaluate_literature_review.py --top-k 15 --versions original
@@ -372,17 +387,188 @@ def index_new_into_chromadb(collection, new_chunks: List[Dict[str, Any]], model,
     return len(new_chunks), n_dup
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Faithfulness judge — LLM-as-judge, no new dependency.
+#
+# What it is, in plain words: after a version answers a question, we
+# ask the SAME OpenRouter model a second, short question: "look at the
+# answer and the retrieved chunks — is every claim in the answer
+# supported by the chunks, or did the model add things that are not
+# there?" The judge splits the answer into claims and counts how many
+# the context supports. Score = supported / total * 100.
+#
+# Why a second LLM call instead of a rule: "is this claim supported?"
+# needs reading and judgement, which a keyword check cannot do. The
+# judge prompt asks for JSON only, so the score can be read by code.
+# If the judge call fails for a query (no key, network error, bad
+# reply), that query gets faithfulness_pct=None plus an error note —
+# the benchmark keeps going and never crashes on a judge failure.
+# ─────────────────────────────────────────────────────────────────────────────
+FAITHFULNESS_JUDGE_PROMPT = """You are checking if an answer is faithful to the given context.
+Split the answer into separate claims, one fact per claim. For each claim, decide if the context supports it.
+
+Context:
+{context}
+
+Answer:
+{answer}
+
+Reply with JSON only, no other text:
+{{"supported": <number of claims the context supports>, "total": <total number of claims>, "verdict": "<one short sentence>"}}
+If the answer says it cannot answer from the context, count that as supported (total 1, supported 1).
+"""
+
+# The judge reads at most this much context. It must be big enough to
+# hold the WHOLE retrieved context, not just the first part of it.
+# Why: with 35 papers indexed, per-paper retrieval returns ~3 chunks
+# per paper, so one query's context is roughly 100 chunks / ~150,000
+# characters. The old cap was 12,000 chars (~8% of the context), so
+# the judge could only see the first few papers and marked nearly
+# every claim about the other papers "unsupported" — faithfulness
+# came out 4-24% even when keyword coverage was 100%. The answer
+# step already feeds the model the full context and it handles it, so
+# the judge gets the same full context. 250,000 chars is only a
+# safety bound against a runaway prompt, not a real truncation.
+_FAITHFULNESS_CONTEXT_CHARS = 250000
+
+
+def _context_from_prompt(prompt: str) -> str:
+    """The retrieved-chunks part of an original-version prompt.
+
+    query_builder() builds "…instructions… User question … Context:
+    <chunks>". The judge only needs the chunks, so take the text after
+    the last "Context:" marker; fall back to the whole prompt.
+    """
+    marker = "\nContext:\n"
+    if marker in prompt:
+        return prompt.rsplit(marker, 1)[1]
+    return prompt
+
+
+def _parse_judge_reply(text: str) -> Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]:
+    """Read {"supported": n, "total": n, "verdict": "..."} from a judge reply.
+
+    Returns (supported, total, verdict, error). error is None on success.
+    The judge is asked for JSON only, but models sometimes add a word
+    or two around it, so the first {...} block is extracted first.
+    """
+    if not text or not text.strip():
+        return None, None, None, "empty judge reply"
+    try:
+        start = text.index("{")
+        end = text.rindex("}") + 1
+        data = json.loads(text[start:end])
+        supported = int(data["supported"])
+        total = int(data["total"])
+        verdict = str(data.get("verdict") or "")
+        if total <= 0 or supported < 0 or supported > total:
+            return None, None, None, f"judge counts out of range: supported={supported}, total={total}"
+        return supported, total, verdict, None
+    except Exception as e:
+        return None, None, None, f"could not read judge reply as JSON ({e})"
+
+
+def _call_judge_llm(judge_prompt: str, llm_model: str) -> Tuple[Optional[str], Optional[str]]:
+    """One short OpenRouter call for the judge. Returns (reply, error).
+
+    Uses the same OpenAI client and base URL as RAG_Pipeline, and the
+    same model as the answer step, with temperature 0 so the judge is
+    as steady as possible. No new package: openai is already required.
+    """
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        return None, f"openai package not available ({e})"
+    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY")
+    if not api_key:
+        return None, "No OpenRouter API key set"
+    try:
+        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+        response = client.chat.completions.create(
+            model=llm_model,
+            messages=[{"role": "user", "content": judge_prompt}],
+            temperature=0.0,
+        )
+        return (response.choices[0].message.content or ""), None
+    except Exception as e:
+        return None, str(e)
+
+
+def judge_faithfulness(answer: str, context: str, llm_model: str = DEFAULT_LLM_MODEL,
+                       judge_fn=None) -> Dict[str, Any]:
+    """Score one answer against its retrieved context. Returns a dict with:
+    faithfulness_pct (0-100, or None), supported, total, verdict, error.
+
+    judge_fn is for tests only: a fake function (prompt, model) ->
+    (reply_text, error) that replaces the real OpenRouter call.
+    """
+    if not answer or not answer.strip():
+        return {"faithfulness_pct": None, "supported": None, "total": None,
+                "verdict": None, "error": "no answer to judge"}
+    if not context or not context.strip():
+        return {"faithfulness_pct": None, "supported": None, "total": None,
+                "verdict": None, "error": "no retrieved context to judge against"}
+    judge_prompt = FAITHFULNESS_JUDGE_PROMPT.format(
+        context=context[:_FAITHFULNESS_CONTEXT_CHARS], answer=answer)
+    # Try the judge twice if it replies empty (the free model
+    # sometimes returns nothing on the first try — Q2 in the first
+    # real run came back "empty judge reply"). An empty reply is
+    # retried; a real error or a non-empty reply is not.
+    reply, error = None, None
+    for _attempt in range(2):
+        if judge_fn is not None:
+            try:
+                reply, error = judge_fn(judge_prompt, llm_model)
+            except Exception as e:
+                return {"faithfulness_pct": None, "supported": None, "total": None,
+                        "verdict": None, "error": str(e)}
+        else:
+            reply, error = _call_judge_llm(judge_prompt, llm_model)
+        if error or (reply and reply.strip()):
+            break
+        reply, error = None, "empty judge reply (after 2 tries)"
+        time.sleep(2)
+    if error:
+        return {"faithfulness_pct": None, "supported": None, "total": None,
+                "verdict": None, "error": error}
+    supported, total, verdict, parse_error = _parse_judge_reply(reply)
+    if parse_error:
+        return {"faithfulness_pct": None, "supported": None, "total": None,
+                "verdict": None, "error": parse_error}
+    return {"faithfulness_pct": round(supported / total * 100, 1), "supported": supported,
+            "total": total, "verdict": verdict, "error": None}
+
+
 def benchmark_end_to_end(collection, model, queries: List[Dict[str, Any]], top_k: int = 10,
                          versions: List[str] = ("original", "langchain"),
-                         llm_model: str = DEFAULT_LLM_MODEL) -> Dict[str, Any]:
+                         llm_model: str = DEFAULT_LLM_MODEL,
+                         judge_model: str = None,
+                         use_faithfulness_judge: bool = True,
+                         judge_fn=None) -> Dict[str, Any]:
     """End-to-end check: same questions through each version's full
     answer path. Compared on answer keyword coverage, sources returned,
-    and latency — NOT on wording, which changes every run."""
+    latency, and faithfulness — NOT on wording, which changes every run.
+    use_faithfulness_judge=False skips the judge (old behaviour).
+    judge_fn is for tests only: a fake judge (prompt, model) ->
+    (reply_text, error) that replaces the real OpenRouter call.
+    judge_model: the model that scores faithfulness. None (default)
+    means the same model that answered. Pass a DIFFERENT model than
+    llm_model for an independent judge: a model judging its own
+    answers shares the answerer's blind spots and tends to favour
+    its own style, so its scores are less credible."""
+    # Effective judge model (None -> same as the answer model).
+    judge_model_eff = judge_model or llm_model
     print("\n" + "=" * 70)
     print(" 5. END-TO-END MULTI-PAPER SYNTHESIS (LLM)")
     print("=" * 70)
     print(" NOTE: LLM wording changes every run. Keyword coverage and")
     print(" source coverage are the comparison; the text itself is a spot-check.")
+    if use_faithfulness_judge:
+        print(" Faithfulness judge is ON: each answer is also scored 0-100")
+        print(" on whether its claims are supported by the retrieved chunks.")
+        print(f" Judge model: {judge_model_eff}"
+              + (" (same as answer model)" if judge_model_eff == llm_model
+                 else " (different from answer model — independent judge)"))
 
     rag.embedding_model = model
     rag.collection = collection
@@ -394,16 +580,30 @@ def benchmark_end_to_end(collection, model, queries: List[Dict[str, Any]], top_k
         llm = langchain_rag.get_llm(model=llm_model)
 
     results: Dict[str, Any] = {}
+    # If OpenRouter's free daily limit (429) hits mid-run, stop the
+    # LLM step instead of failing every remaining question in ~3 s
+    # each: the rest of the answers would be empty anyway.
+    stop_llm = False
     for version in versions:
+        if stop_llm:
+            print(f"\n --- Version: {version} --- (skipped: rate limit hit)")
+            results[version] = {"queries": [], "faithfulness_avg_pct": None,
+                                "faithfulness_judged": 0, "faithfulness_total_queries": 0,
+                                "judge_model": judge_model_eff}
+            continue
         print(f"\n --- Version: {version} ---")
         per_query = []
         for item in queries:
             t0 = time.perf_counter()
             answer, sources, error = "", [], None
+            context_text = ""
             try:
                 if version == "original":
                     prompt, sources, _ids = rag.query_builder(item["query"], top_k=top_k)
-                    ans = rag.answer_generator(prompt)
+                    # The prompt already contains the retrieved chunks;
+                    # the judge only needs the chunks part of it.
+                    context_text = _context_from_prompt(prompt)
+                    ans = rag.answer_generator(prompt, model=llm_model)
                     if ans.get("success"):
                         answer = ans.get("content") or ""
                     else:
@@ -412,13 +612,25 @@ def benchmark_end_to_end(collection, model, queries: List[Dict[str, Any]], top_k
                     res = langchain_rag.ask(item["query"], top_k=top_k, llm=llm, vectorstore=vectorstore)
                     answer = res.get("answer") or ""
                     sources = res.get("sources") or []
+                    # ask() returns the retrieved chunks as "context"
+                    # (see langchain_rag.build_chain) — no extra
+                    # retrieval needed for the judge.
+                    context_text = res.get("context") or ""
             except Exception as e:
                 error = str(e)
             lat = time.perf_counter() - t0
             kw_found = [k for k in (item.get("expected_keywords") or []) if br._norm(k) in br._norm(answer)]
             coverage = round(len(kw_found) / len(item["expected_keywords"]) * 100, 1) if item.get("expected_keywords") else 0.0
+            # Faithfulness judge: only when there is an answer to judge.
+            # A judge failure is recorded per query and never stops the run.
+            faith = {"faithfulness_pct": None, "supported": None, "total": None,
+                     "verdict": None, "error": None}
+            if use_faithfulness_judge and answer and not error:
+                faith = judge_faithfulness(answer, context_text, llm_model=judge_model_eff, judge_fn=judge_fn)
+            faith_str = (f", faithfulness {faith['faithfulness_pct']}%" if faith["faithfulness_pct"] is not None
+                         else (f", faithfulness n/a ({faith['error']})" if use_faithfulness_judge and answer and not error else ""))
             print(f" {item['id']}: {len(answer)} chars, {len(sources)} source paper(s), "
-                  f"keyword coverage {coverage}%, {lat:.1f}s" + (f"  ERROR: {error}" if error else ""))
+                  f"keyword coverage {coverage}%, {lat:.1f}s{faith_str}" + (f"  ERROR: {error}" if error else ""))
             per_query.append({
                 "id": item["id"],
                 "query": item["query"],
@@ -428,8 +640,34 @@ def benchmark_end_to_end(collection, model, queries: List[Dict[str, Any]], top_k
                 "keywords_found": kw_found,
                 "latency_sec": round(lat, 2),
                 "error": error,
+                "faithfulness_pct": faith["faithfulness_pct"],
+                "faithfulness_supported": faith["supported"],
+                "faithfulness_total": faith["total"],
+                "faithfulness_verdict": faith["verdict"],
+                "faithfulness_error": faith["error"],
             })
-        results[version] = {"queries": per_query}
+            # Stop the whole LLM step on a rate-limit error (429):
+            # further answer and judge calls would fail the same way.
+            if error and ("429" in error or "Rate limit" in error):
+                print(" [!] OpenRouter free daily limit hit (429) — stopping the LLM step here.")
+                print("     Re-run after the daily reset (00:00 UTC / 05:30 IST), or add $10 of")
+                print("     credits to raise the free-model limit from 50 to 1000 requests/day.")
+                stop_llm = True
+            elif faith["error"] and ("429" in faith["error"] or "Rate limit" in faith["error"]):
+                print(" [!] OpenRouter free daily limit hit (429) on the judge — stopping the LLM step here.")
+                print("     Re-run after the daily reset (00:00 UTC / 05:30 IST), or add $10 of")
+                print("     credits to raise the free-model limit from 50 to 1000 requests/day.")
+                stop_llm = True
+            if stop_llm:
+                break
+        scored = [q["faithfulness_pct"] for q in per_query if q.get("faithfulness_pct") is not None]
+        results[version] = {
+            "queries": per_query,
+            "faithfulness_avg_pct": round(statistics.mean(scored), 1) if scored else None,
+            "faithfulness_judged": len(scored),
+            "faithfulness_total_queries": len(per_query),
+            "judge_model": judge_model_eff,
+        }
     return results
 
 
@@ -539,7 +777,9 @@ def run_full_literature_benchmark(args) -> None:
         else:
             llm_results = benchmark_end_to_end(collection, model, br.BENCHMARK_QUERIES,
                                                top_k=args.top_k, versions=versions,
-                                               llm_model=args.llm_model)
+                                               llm_model=args.llm_model,
+                                               judge_model=args.judge_model,
+                                               use_faithfulness_judge=not args.no_faithfulness)
 
     total_elapsed = time.perf_counter() - start_all
     print("\n" + "=" * 70)
@@ -551,6 +791,24 @@ def run_full_literature_benchmark(args) -> None:
         print(f"{version:<12} {g['top1_acc_pct']:>5.1f}% {g['top3_acc_pct']:>5.1f}% {g['top5_acc_pct']:>5.1f}% "
               f"{g['mrr']:>7.4f} {c['coverage_pct']:>7.1f}% {g['avg_retrieval_lat_ms']:>9.2f} "
               f"{c['avg_retrieval_lat_ms']:>8.2f}")
+    print("=" * 70)
+    if llm_results:
+        print(" COMPARISON (LLM end-to-end — spot-check numbers)")
+        print("=" * 70)
+        print(f"{'Version':<12} {'Keyword %':>10} {'Faithful %':>11} {'Judged':>7} {'Avg lat':>9}")
+        for version in versions:
+            v = llm_results.get(version) or {}
+            qs = v.get("queries") or []
+            kw_avg = round(statistics.mean([q.get("keyword_coverage_pct") or 0 for q in qs]), 1) if qs else 0.0
+            lat_avg = round(statistics.mean([q.get("latency_sec") or 0 for q in qs]), 1) if qs else 0.0
+            faith_avg = v.get("faithfulness_avg_pct")
+            faith_str = f"{faith_avg:>10.1f}%" if faith_avg is not None else "        n/a"
+            print(f"{version:<12} {kw_avg:>9.1f}% {faith_str} {v.get('faithfulness_judged', 0):>7} {lat_avg:>8.1f}s")
+        print(" Faithfulness = % of the answer's claims supported by the")
+        judge_name = next((v.get("judge_model") for v in llm_results.values() if v.get("judge_model")), None)
+        print(f" retrieved chunks (judge: {judge_name}). Higher is" if judge_name
+              else " retrieved chunks. Higher is")
+        print(" better; a few points of wobble between runs is normal.")
     print("=" * 70)
     print(f" BENCHMARK COMPLETE (Total Runtime: {total_elapsed:.2f}s)")
     print("=" * 70)
@@ -583,9 +841,15 @@ def main() -> None:
     parser.add_argument("--versions", choices=["both", "original", "langchain"], default="both",
                         help="Which pipeline version(s) to test")
     parser.add_argument("--no-llm", action="store_true", help="Retrieval only, no OpenRouter LLM calls")
+    parser.add_argument("--no-faithfulness", action="store_true",
+                        help="Skip the faithfulness judge in the LLM step (saves one extra LLM call per query per version)")
     parser.add_argument("--reuse-index", action="store_true", help="Benchmark only: open the existing collection, do not parse or index anything")
     parser.add_argument("--rebuild-index", action="store_true", help="Delete the collection and index everything from scratch (clean slate)")
     parser.add_argument("--llm-model", default=DEFAULT_LLM_MODEL, help="OpenRouter model for the end-to-end step")
+    parser.add_argument("--judge-model", default=None,
+                        help="OpenRouter model for the faithfulness judge (default: same as --llm-model). "
+                             "Use a DIFFERENT model than the answerer so the judge is independent: "
+                             "a model judging its own answers shares its blind spots.")
     parser.add_argument("--output", default="literature_review_benchmark_results.json", help="Results JSON file")
     args = parser.parse_args()
     run_full_literature_benchmark(args)

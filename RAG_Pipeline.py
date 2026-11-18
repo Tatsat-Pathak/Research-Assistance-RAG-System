@@ -587,10 +587,13 @@ Context:
 # ─────────────────────────────────────────────────────────────────────────────
 # Answer Generation (OpenRouter API)
 # ─────────────────────────────────────────────────────────────────────────────
-def answer_generator(prompt: str) -> dict:
+def answer_generator(prompt: str, model: str = None) -> dict:
     load_dotenv()
     api_key = os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-    llm_model = os.getenv("RAG_LLM_MODEL", "nvidia/nemotron-3.5-super-vl:free")
+    # `model` overrides the .env setting when given (the benchmark
+    # passes its --llm-model this way, so one flag controls both
+    # versions). Otherwise the .env value wins, else the default.
+    llm_model = model or os.getenv("RAG_LLM_MODEL", "nvidia/nemotron-3.5-super-vl:free")
 
     if not api_key:
         return {
